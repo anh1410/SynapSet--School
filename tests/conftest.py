@@ -71,6 +71,7 @@ def api_client(tmp_path, monkeypatch):
     monkeypatch.setenv("TEACHER_STORE_PATH", str(tmp_path / "teachers.json"))
     monkeypatch.setenv("SUBJECT_STORE_PATH", str(tmp_path / "subjects.json"))
     monkeypatch.setenv("DRAFT_STORE_PATH", str(tmp_path / "builder_drafts.json"))
+    monkeypatch.setenv("TEMPLATE_STORE_PATH", str(tmp_path / "paper_templates.json"))
 
     from app.core.config import get_settings
     from app.core.document_store import get_document_store
@@ -79,6 +80,7 @@ def api_client(tmp_path, monkeypatch):
     from app.core.question_bank import get_question_bank
     from app.core.subject_store import get_subject_store
     from app.core.teacher_store import get_teacher_store
+    from app.core.template_store import get_template_store
     from app.core.vector_store import get_chroma_client
 
     cached_fns = (
@@ -90,6 +92,7 @@ def api_client(tmp_path, monkeypatch):
         get_chroma_client,
         get_subject_store,
         get_teacher_store,
+        get_template_store,
     )
     for cached in cached_fns:
         cached.cache_clear()

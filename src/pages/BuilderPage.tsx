@@ -10,6 +10,7 @@ import {
   RefreshCw,
   X,
   ShieldAlert,
+  BookmarkPlus,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,18 +26,21 @@ import {
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_ORDER,
   createBlueprint,
+  createTemplate,
   deleteDraft,
   difficultyBucket,
   fetchGraph,
   fetchQuestions,
   generateSection,
   getDraft,
+  listTemplates,
   putDraft,
   type BuilderDraft,
   type Difficulty,
   type DraftSection,
   type GeneratedQuestionResult,
   type GraphNode,
+  type PaperTemplate,
   type QuestionType,
 } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
@@ -78,9 +82,17 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
   const [saving, setSaving] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
+  const [templates, setTemplates] = useState<PaperTemplate[]>([]);
+  const [savingTemplateName, setSavingTemplateName] = useState<string | null>(null);
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   const draftIdRef = useRef<string>(`draft-${Date.now()}`);
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Templates are teacher-scoped (reusable across subjects), so load them once.
+  useEffect(() => {
+    listTemplates().then(setTemplates).catch(() => {});
+  }, []);
 
   // Load topics + rehydrate any existing draft for this subject.
   useEffect(() => {
@@ -193,6 +205,46 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
       s.map((sec) => (sec.id === id ? { ...sec, question_format: format, marks_per_question: DEFAULT_MARKS[format] } : sec))
     );
 
+  const applyTemplate = (templateId: string) => {
+    const template = templates.find((t) => t.id === templateId);
+    if (!template) return;
+    setSections(
+      template.sections.map((ts) => ({
+        id: newSectionId(),
+        question_format: ts.question_format,
+        count: ts.count,
+        topic_ids: [],
+        difficulty: ts.difficulty,
+        marks_per_question: ts.marks_per_question,
+        generated_question_ids: [],
+      }))
+    );
+    if (template.duration_minutes != null) setDuration(template.duration_minutes);
+    setSectionResults([]);
+    setHasGenerated(false);
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!savingTemplateName || !savingTemplateName.trim() || sections.length === 0) return;
+    setSavingTemplate(true);
+    try {
+      const template = await createTemplate({
+        name: savingTemplateName.trim(),
+        duration_minutes: duration,
+        sections: sections.map((s) => ({
+          question_format: s.question_format,
+          count: s.count,
+          difficulty: s.difficulty,
+          marks_per_question: s.marks_per_question,
+        })),
+      });
+      setTemplates((prev) => [template, ...prev]);
+      setSavingTemplateName(null);
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   const topicName = (id: string) => topics.find((t) => t.id === id)?.name ?? id;
 
   const plannedQuestions = sections.reduce((s, sec) => s + sec.count, 0);
@@ -303,6 +355,20 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
             <Input value={duration} onChange={(e) => setDuration(Number(e.target.value))} type="number" />
           </div>
 
+          {templates.length > 0 && (
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-foreground">Load Template</label>
+              <Select defaultValue="" onChange={(e) => e.target.value && applyTemplate(e.target.value)}>
+                <option value="">Choose a saved pattern…</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.sections.length} section{t.sections.length !== 1 && "s"})
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+
           <div className="space-y-3">
             {sections.map((section, idx) => (
               <div key={section.id} className="space-y-2.5 rounded-lg border border-border p-3">
@@ -396,6 +462,36 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
           <Button variant="outline" size="sm" className="w-full" onClick={addSection}>
             <Plus className="h-3.5 w-3.5" /> Add Section
           </Button>
+
+          {savingTemplateName !== null ? (
+            <div className="space-y-1.5 rounded-lg border border-border p-2.5">
+              <label className="text-[11px] font-medium text-muted-foreground">Template name</label>
+              <Input
+                autoFocus
+                value={savingTemplateName}
+                onChange={(e) => setSavingTemplateName(e.target.value)}
+                placeholder="e.g. Weekly Quiz Pattern"
+              />
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleSaveTemplate} disabled={savingTemplate || !savingTemplateName.trim()}>
+                  {savingTemplate ? "Saving..." : "Save"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSavingTemplateName(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => setSavingTemplateName("")}
+              disabled={sections.length === 0}
+            >
+              <BookmarkPlus className="h-3.5 w-3.5" /> Save as Template
+            </Button>
+          )}
 
           <div className="rounded-lg border border-border bg-secondary/40 p-3 text-xs">
             <div className="flex justify-between">

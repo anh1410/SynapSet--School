@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # Builder drafts (in-progress paper configuration, one per teacher+subject)
     draft_store_path: str = str(BASE_DIR / "data" / "builder_drafts.json")
 
+    # Reusable paper templates (section structure only, teacher-scoped)
+    template_store_path: str = str(BASE_DIR / "data" / "paper_templates.json")
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -215,6 +215,36 @@ export function deleteDraft(subjectId: string) {
   return apiFetch<{ cleared: boolean }>(`/drafts?subject_id=${encodeURIComponent(subjectId)}`, { method: "DELETE" });
 }
 
+// ---------- Paper templates (reusable section patterns, teacher-scoped) ----------
+
+export interface TemplateSection {
+  question_format: QuestionType;
+  count: number;
+  difficulty: Difficulty;
+  marks_per_question: number;
+}
+
+export interface PaperTemplate {
+  id: string;
+  teacher_id: string;
+  name: string;
+  duration_minutes: number | null;
+  sections: TemplateSection[];
+  created_at: string;
+}
+
+export function listTemplates() {
+  return apiFetch<PaperTemplate[]>("/templates");
+}
+
+export function createTemplate(data: { name: string; duration_minutes?: number | null; sections: TemplateSection[] }) {
+  return apiFetch<PaperTemplate>("/templates", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function deleteTemplate(id: string) {
+  return apiFetch<{ deleted: string }>(`/templates/${id}`, { method: "DELETE" });
+}
+
 export interface BloomDistribution {
   weights: Partial<Record<BloomLevel, number>>;
 }
