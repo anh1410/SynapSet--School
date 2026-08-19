@@ -1,66 +1,68 @@
-import json
 from functools import lru_cache
-from pathlib import Path
 
 from app.core.config import get_settings
+from app.core.db import connect, dump, load
 from app.schemas.draft import BuilderDraft
 
 
+def _row_to_draft(row) -> BuilderDraft:
+    d = dict(row)
+    d["sections"] = load(d["sections"]) or []
+    return BuilderDraft.model_validate(d)
+
+
 class DraftStore:
-    """JSON-file-backed store for in-progress Question Paper Builder drafts.
+    """SQLite-backed store for in-progress Question Paper Builder drafts.
     One draft per (teacher_id, subject_id) — starting a new paper for the
     same subject overwrites the previous unsaved draft."""
 
     def __init__(self, persist_path: str):
-        self.persist_path = Path(persist_path)
-        self.drafts: dict[str, BuilderDraft] = self._load()
-
-    def _key(self, teacher_id: str, subject_id: str) -> str:
-        return f"{teacher_id}:{subject_id}"
-
-    def _load(self) -> dict[str, BuilderDraft]:
-        if self.persist_path.exists():
-            data = json.loads(self.persist_path.read_text(encoding="utf-8"))
-            return {row["id"]: BuilderDraft.model_validate(row) for row in data}
-        return {}
-
-    def save(self) -> None:
-        self.persist_path.parent.mkdir(parents=True, exist_ok=True)
-        data = [d.model_dump(mode="json") for d in self.drafts.values()]
-        self.persist_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self.persist_path = persist_path
 
     def get_for_subject(self, teacher_id: str, subject_id: str) -> BuilderDraft | None:
-        key = self._key(teacher_id, subject_id)
-        for draft in self.drafts.values():
-            if self._key(draft.teacher_id, draft.subject_id) == key:
-                return draft
-        return None
+        with connect(self.persist_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM builder_drafts WHERE teacher_id = ? AND subject_id = ?",
+                (teacher_id, subject_id),
+            ).fetchone()
+        return _row_to_draft(row) if row else None
 
     def upsert(self, draft: BuilderDraft) -> None:
-        # Enforce one draft per (teacher, subject): drop any existing draft for
-        # this pair under a different id before storing the new one.
-        key = self._key(draft.teacher_id, draft.subject_id)
-        stale = [
-            d.id
-            for d in self.drafts.values()
-            if self._key(d.teacher_id, d.subject_id) == key and d.id != draft.id
-        ]
-        for stale_id in stale:
-            del self.drafts[stale_id]
-        self.drafts[draft.id] = draft
-        self.save()
+        with connect(self.persist_path) as conn:
+            # Enforce one draft per (teacher, subject): drop any existing draft
+            # for this pair under a different id before storing the new one.
+            conn.execute(
+                "DELETE FROM builder_drafts WHERE teacher_id = ? AND subject_id = ? AND id != ?",
+                (draft.teacher_id, draft.subject_id, draft.id),
+            )
+            conn.execute(
+                """INSERT INTO builder_drafts (id, teacher_id, subject_id, paper_name, duration_minutes, sections, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       teacher_id = excluded.teacher_id, subject_id = excluded.subject_id,
+                       paper_name = excluded.paper_name, duration_minutes = excluded.duration_minutes,
+                       sections = excluded.sections, updated_at = excluded.updated_at""",
+                (
+                    draft.id,
+                    draft.teacher_id,
+                    draft.subject_id,
+                    draft.paper_name,
+                    draft.duration_minutes,
+                    dump([s.model_dump(mode="json") for s in draft.sections]),
+                    draft.updated_at.isoformat(),
+                ),
+            )
 
     def clear(self, teacher_id: str, subject_id: str) -> bool:
-        key = self._key(teacher_id, subject_id)
-        match = next((d for d in self.drafts.values() if self._key(d.teacher_id, d.subject_id) == key), None)
-        if match is None:
-            return False
-        del self.drafts[match.id]
-        self.save()
-        return True
+        with connect(self.persist_path) as conn:
+            cur = conn.execute(
+                "DELETE FROM builder_drafts WHERE teacher_id = ? AND subject_id = ?",
+                (teacher_id, subject_id),
+            )
+        return cur.rowcount > 0
 
 
 @lru_cache
 def get_draft_store() -> DraftStore:
     settings = get_settings()
-    return DraftStore(settings.draft_store_path)
+    return DraftStore(settings.database_path)

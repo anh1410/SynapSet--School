@@ -1,48 +1,46 @@
-import json
 from functools import lru_cache
-from pathlib import Path
 
 from app.core.config import get_settings
+from app.core.db import connect
 from app.schemas.teacher import Teacher
 
 
 class TeacherStore:
-    """JSON-file-backed registry of teacher accounts."""
+    """SQLite-backed registry of teacher accounts."""
 
     def __init__(self, persist_path: str):
-        self.persist_path = Path(persist_path)
-        self.teachers: dict[str, Teacher] = self._load()
-
-    def _load(self) -> dict[str, Teacher]:
-        if self.persist_path.exists():
-            data = json.loads(self.persist_path.read_text(encoding="utf-8"))
-            return {row["id"]: Teacher.model_validate(row) for row in data}
-        return {}
-
-    def save(self) -> None:
-        self.persist_path.parent.mkdir(parents=True, exist_ok=True)
-        data = [t.model_dump(mode="json") for t in self.teachers.values()]
-        self.persist_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self.persist_path = persist_path
 
     def add(self, teacher: Teacher) -> None:
-        self.teachers[teacher.id] = teacher
-        self.save()
+        with connect(self.persist_path) as conn:
+            conn.execute(
+                """INSERT INTO teachers (id, email, name, password_hash, created_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       email = excluded.email,
+                       name = excluded.name,
+                       password_hash = excluded.password_hash,
+                       created_at = excluded.created_at""",
+                (teacher.id, teacher.email, teacher.name, teacher.password_hash, teacher.created_at.isoformat()),
+            )
 
     def get(self, teacher_id: str) -> Teacher | None:
-        return self.teachers.get(teacher_id)
+        with connect(self.persist_path) as conn:
+            row = conn.execute("SELECT * FROM teachers WHERE id = ?", (teacher_id,)).fetchone()
+        return Teacher.model_validate(dict(row)) if row else None
 
     def get_by_email(self, email: str) -> Teacher | None:
-        email_lower = email.lower()
-        for teacher in self.teachers.values():
-            if teacher.email.lower() == email_lower:
-                return teacher
-        return None
+        with connect(self.persist_path) as conn:
+            row = conn.execute("SELECT * FROM teachers WHERE lower(email) = lower(?)", (email,)).fetchone()
+        return Teacher.model_validate(dict(row)) if row else None
 
     def list(self) -> list[Teacher]:
-        return sorted(self.teachers.values(), key=lambda t: t.created_at)
+        with connect(self.persist_path) as conn:
+            rows = conn.execute("SELECT * FROM teachers ORDER BY created_at").fetchall()
+        return [Teacher.model_validate(dict(r)) for r in rows]
 
 
 @lru_cache
 def get_teacher_store() -> TeacherStore:
     settings = get_settings()
-    return TeacherStore(settings.teacher_store_path)
+    return TeacherStore(settings.database_path)

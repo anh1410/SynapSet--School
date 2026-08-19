@@ -11,13 +11,7 @@ data/uploads/*
 !data/uploads/.gitkeep
 data/exports/
 *.gpickle
-question_bank.json
-documents.json
-paper_blueprints.json
-teachers.json
-subjects.json
-builder_drafts.json
-paper_templates.json
+data/synapset_school.db
 .pytest_cache/
 *.egg-info/
 tsconfig.tsbuildinfo

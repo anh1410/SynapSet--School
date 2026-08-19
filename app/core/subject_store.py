@@ -1,51 +1,47 @@
-import json
 from functools import lru_cache
-from pathlib import Path
 
 from app.core.config import get_settings
+from app.core.db import connect
 from app.schemas.subject import Subject
 
 
 class SubjectStore:
-    """JSON-file-backed registry of subjects, each owned by a teacher."""
+    """SQLite-backed registry of subjects, each owned by a teacher."""
 
     def __init__(self, persist_path: str):
-        self.persist_path = Path(persist_path)
-        self.subjects: dict[str, Subject] = self._load()
-
-    def _load(self) -> dict[str, Subject]:
-        if self.persist_path.exists():
-            data = json.loads(self.persist_path.read_text(encoding="utf-8"))
-            return {row["id"]: Subject.model_validate(row) for row in data}
-        return {}
-
-    def save(self) -> None:
-        self.persist_path.parent.mkdir(parents=True, exist_ok=True)
-        data = [s.model_dump(mode="json") for s in self.subjects.values()]
-        self.persist_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self.persist_path = persist_path
 
     def add(self, subject: Subject) -> None:
-        self.subjects[subject.id] = subject
-        self.save()
+        with connect(self.persist_path) as conn:
+            conn.execute(
+                """INSERT INTO subjects (id, teacher_id, name, created_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       teacher_id = excluded.teacher_id,
+                       name = excluded.name,
+                       created_at = excluded.created_at""",
+                (subject.id, subject.teacher_id, subject.name, subject.created_at.isoformat()),
+            )
 
     def get(self, subject_id: str) -> Subject | None:
-        return self.subjects.get(subject_id)
+        with connect(self.persist_path) as conn:
+            row = conn.execute("SELECT * FROM subjects WHERE id = ?", (subject_id,)).fetchone()
+        return Subject.model_validate(dict(row)) if row else None
 
     def remove(self, subject_id: str) -> bool:
-        if subject_id in self.subjects:
-            del self.subjects[subject_id]
-            self.save()
-            return True
-        return False
+        with connect(self.persist_path) as conn:
+            cur = conn.execute("DELETE FROM subjects WHERE id = ?", (subject_id,))
+        return cur.rowcount > 0
 
     def list_by_teacher(self, teacher_id: str) -> list[Subject]:
-        return sorted(
-            (s for s in self.subjects.values() if s.teacher_id == teacher_id),
-            key=lambda s: s.created_at,
-        )
+        with connect(self.persist_path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM subjects WHERE teacher_id = ? ORDER BY created_at", (teacher_id,)
+            ).fetchall()
+        return [Subject.model_validate(dict(r)) for r in rows]
 
 
 @lru_cache
 def get_subject_store() -> SubjectStore:
     settings = get_settings()
-    return SubjectStore(settings.subject_store_path)
+    return SubjectStore(settings.database_path)

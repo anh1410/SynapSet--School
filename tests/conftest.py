@@ -62,16 +62,10 @@ def api_client(tmp_path, monkeypatch):
     """A TestClient wired to isolated, per-test storage (graph/bank/chroma/uploads/exports)
     so API tests never touch real project data."""
     monkeypatch.setenv("GRAPH_STORE_DIR", str(tmp_path / "graphs"))
-    monkeypatch.setenv("QUESTION_BANK_PATH", str(tmp_path / "bank.json"))
-    monkeypatch.setenv("DOCUMENT_STORE_PATH", str(tmp_path / "documents.json"))
-    monkeypatch.setenv("PAPER_STORE_PATH", str(tmp_path / "paper_blueprints.json"))
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("EXPORT_DIR", str(tmp_path / "exports"))
-    monkeypatch.setenv("TEACHER_STORE_PATH", str(tmp_path / "teachers.json"))
-    monkeypatch.setenv("SUBJECT_STORE_PATH", str(tmp_path / "subjects.json"))
-    monkeypatch.setenv("DRAFT_STORE_PATH", str(tmp_path / "builder_drafts.json"))
-    monkeypatch.setenv("TEMPLATE_STORE_PATH", str(tmp_path / "paper_templates.json"))
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
 
     from app.core.config import get_settings
     from app.core.document_store import get_document_store

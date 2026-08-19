@@ -33,15 +33,6 @@ class Settings(BaseSettings):
     # Graph storage (used when Neo4j is not configured) — one pickle file per subject
     graph_store_dir: str = str(BASE_DIR / "data" / "graphs")
 
-    # Question bank storage
-    question_bank_path: str = str(BASE_DIR / "data" / "question_bank.json")
-
-    # Uploaded document registry
-    document_store_path: str = str(BASE_DIR / "data" / "documents.json")
-
-    # Saved exam paper blueprints
-    paper_store_path: str = str(BASE_DIR / "data" / "paper_blueprints.json")
-
     # Paper export output
     export_dir: str = str(BASE_DIR / "data" / "exports")
 
@@ -49,17 +40,11 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-insecure-secret-change-me"
     jwt_expire_minutes: int = 60 * 24 * 7
 
-    # Teacher accounts
-    teacher_store_path: str = str(BASE_DIR / "data" / "teachers.json")
-
-    # Subjects
-    subject_store_path: str = str(BASE_DIR / "data" / "subjects.json")
-
-    # Builder drafts (in-progress paper configuration, one per teacher+subject)
-    draft_store_path: str = str(BASE_DIR / "data" / "builder_drafts.json")
-
-    # Reusable paper templates (section structure only, teacher-scoped)
-    template_store_path: str = str(BASE_DIR / "data" / "paper_templates.json")
+    # SQLite database — teachers, subjects, documents, questions, paper
+    # blueprints, builder drafts, and paper templates all live here as real
+    # tables (one file, browsable with any SQLite GUI). Knowledge graphs and
+    # vector embeddings stay separate since they aren't relational data.
+    database_path: str = str(BASE_DIR / "data" / "synapset_school.db")
 
 
 @lru_cache
