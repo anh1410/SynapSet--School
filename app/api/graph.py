@@ -12,10 +12,11 @@ from app.core.graph_store import get_graph_store
 from app.core.question_bank import get_question_bank
 from app.schemas.document import DocumentCategory, UploadedDocument
 from app.schemas.teacher import Teacher
+from app.services.document_cleanup import remove_document_from_graph
 from app.services.document_extraction import extract_and_chunk, extract_and_chunk_for_extraction
 from app.services.entity_extraction import extract_from_chunk, merge_into_graph
 from app.services.topic_dedup import merge_duplicate_topics
-from app.services.vector_indexing import index_chunks
+from app.services.vector_indexing import delete_document_chunks, index_chunks
 
 router = APIRouter(prefix="/api/v1/graph", tags=["graph"], dependencies=[Depends(get_current_teacher)])
 
@@ -103,8 +104,19 @@ def delete_document(document_id: str, teacher: Teacher = Depends(get_current_tea
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     require_subject(document.subject_id, teacher)
+
+    graph_store = get_graph_store(document.subject_id)
+    cleanup = remove_document_from_graph(graph_store, document.filename)
+    if cleanup["nodes_removed"] or cleanup["edges_removed"]:
+        scores = graph_store.compute_pagerank()
+        for node_id, score in scores.items():
+            graph_store.graph.nodes[node_id]["importance_score"] = score
+    graph_store.save()
+
+    delete_document_chunks(document.subject_id, document.filename)
+
     store.remove(document_id)
-    return {"deleted": document_id}
+    return {"deleted": document_id, **cleanup}
 
 
 class GraphNodeOut(BaseModel):
