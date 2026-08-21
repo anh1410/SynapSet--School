@@ -60,6 +60,7 @@ def _render_worker(source: str, conn) -> None:
     itself, which removes file-write access as an attack surface entirely."""
     try:
         import io
+        import math
 
         import matplotlib
 
@@ -68,7 +69,27 @@ def _render_worker(source: str, conn) -> None:
         import numpy as np
 
         plt.figure(figsize=(5, 4))
-        safe_globals = {"plt": plt, "np": np, "__builtins__": {"range": range, "len": len, "enumerate": enumerate}}
+
+        def _safe_import(name, *args, **kwargs):
+            # check_diagram_code_safety already restricts `import` statements in the
+            # source to ALLOWED_IMPORTS - this just makes those same imports actually
+            # work (the prompt asks Gemini to rely on the pre-injected plt/np instead,
+            # but it doesn't always comply, so a redundant `import numpy as np` etc.
+            # must not crash the render with a bare "__import__ not found").
+            if name in ("numpy", "math", "matplotlib", "matplotlib.pyplot"):
+                return {"numpy": np, "math": math, "matplotlib": matplotlib, "matplotlib.pyplot": plt}[name]
+            raise ImportError(f"import not allowed: {name}")
+
+        safe_globals = {
+            "plt": plt,
+            "np": np,
+            "__builtins__": {
+                "range": range,
+                "len": len,
+                "enumerate": enumerate,
+                "__import__": _safe_import,
+            },
+        }
         exec(compile(source, "<diagram>", "exec"), safe_globals)  # noqa: S102 - pre-checked by check_diagram_code_safety
 
         buf = io.BytesIO()
@@ -81,7 +102,7 @@ def _render_worker(source: str, conn) -> None:
         conn.close()
 
 
-def execute_matplotlib_diagram(source: str, timeout_seconds: int = 10) -> bytes:
+def execute_matplotlib_diagram(source: str, timeout_seconds: int = 30) -> bytes:
     """Renders `source` (pre-validated Matplotlib code) in an isolated
     process and returns PNG bytes. Raises UnsafeDiagramCodeError if the
     code fails the safety check, or DiagramTimeoutError if it runs too long."""
@@ -111,7 +132,7 @@ def execute_matplotlib_diagram(source: str, timeout_seconds: int = 10) -> bytes:
     return payload
 
 
-def execute_tikz_diagram(source: str, timeout_seconds: int = 10) -> bytes | None:
+def execute_tikz_diagram(source: str, timeout_seconds: int = 30) -> bytes | None:
     """Best-effort only: renders TikZ via pdflatex/tectonic if either is
     installed. Returns None immediately if neither toolchain is found on
     PATH — callers must treat that as "render unavailable", not an error."""
