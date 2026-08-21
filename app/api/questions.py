@@ -41,6 +41,25 @@ class GenerateQuestionsResponse(BaseModel):
     results: list[GeneratedQuestionResult]
 
 
+# Bloom/difficulty-scoring and duplicate-detection assume real gradable text.
+# visual_worksheet questions have near-empty `text` (an instruction line at
+# most), so those features are meaningless for them - skip rather than run
+# word-count/embedding logic against almost nothing. stem_diagram content is
+# real, topic-grounded text, so it keeps full scoring.
+_SKIP_SCORING_TYPES = {QuestionType.VISUAL_WORKSHEET}
+
+
+def _score_and_flag(q: Question, graph_store, bank, check_duplicates: bool) -> GeneratedQuestionResult:
+    if q.question_type in _SKIP_SCORING_TYPES:
+        difficulty = DifficultyScore(score=0.0, features={}, shap_contributions=None, method="heuristic")
+        matches: list[DuplicateMatch] = []
+    else:
+        difficulty = score_difficulty(q, graph_store)
+        q.difficulty_score = difficulty.score
+        matches = find_duplicates(q, bank.list_by_subject(q.subject_id)) if check_duplicates else []
+    return GeneratedQuestionResult(question=q, difficulty=difficulty, duplicate_matches=matches)
+
+
 @router.post("/generate", response_model=GenerateQuestionsResponse)
 def generate(request: GenerateQuestionsRequest, teacher: Teacher = Depends(get_current_teacher)) -> GenerateQuestionsResponse:
     """RAG-generate questions for a topic, score their difficulty, and flag duplicates
@@ -63,10 +82,8 @@ def generate(request: GenerateQuestionsRequest, teacher: Teacher = Depends(get_c
 
     results = []
     for q in questions:
-        difficulty = score_difficulty(q, graph_store)
-        q.difficulty_score = difficulty.score
-        matches = find_duplicates(q, bank.list_by_subject(request.subject_id)) if request.check_duplicates else []
-        results.append(GeneratedQuestionResult(question=q, difficulty=difficulty, duplicate_matches=matches))
+        result = _score_and_flag(q, graph_store, bank, request.check_duplicates)
+        results.append(result)
         if request.save_to_bank:
             bank.add(q)
 
@@ -111,10 +128,8 @@ def generate_section(request: GenerateSectionRequest, teacher: Teacher = Depends
 
     results = []
     for q in questions:
-        difficulty = score_difficulty(q, graph_store)
-        q.difficulty_score = difficulty.score
-        matches = find_duplicates(q, bank.list_by_subject(request.subject_id)) if request.check_duplicates else []
-        results.append(GeneratedQuestionResult(question=q, difficulty=difficulty, duplicate_matches=matches))
+        result = _score_and_flag(q, graph_store, bank, request.check_duplicates)
+        results.append(result)
         if request.save_to_bank:
             bank.add(q)
 
