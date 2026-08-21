@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Paper export output
     export_dir: str = str(BASE_DIR / "data" / "exports")
 
+    # Rendered diagram / worksheet images
+    image_dir: str = str(BASE_DIR / "data" / "images")
+
     # Auth
     jwt_secret: str = "dev-insecure-secret-change-me"
     jwt_expire_minutes: int = 60 * 24 * 7

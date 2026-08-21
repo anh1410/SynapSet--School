@@ -10,6 +10,7 @@ data/chroma/
 data/uploads/*
 !data/uploads/.gitkeep
 data/exports/
+data/images/
 *.gpickle
 data/synapset_school.db
 .pytest_cache/

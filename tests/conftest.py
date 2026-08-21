@@ -65,6 +65,7 @@ def api_client(tmp_path, monkeypatch):
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("EXPORT_DIR", str(tmp_path / "exports"))
+    monkeypatch.setenv("IMAGE_DIR", str(tmp_path / "images"))
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
 
     from app.core.config import get_settings

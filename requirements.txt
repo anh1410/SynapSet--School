@@ -41,5 +41,9 @@ reportlab==5.0.0
 bcrypt==5.0.0
 pyjwt==2.13.0
 
+# STEM diagrams, rasterized LaTeX, and placeholder worksheet images
+matplotlib==3.11.1
+Pillow==12.3.0
+
 # Testing
 pytest==9.1.1
