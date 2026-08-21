@@ -49,14 +49,20 @@ QUESTION_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
         "Leave `options`, `match_pairs`, and `is_true` empty."
     ),
     QuestionType.VISUAL_WORKSHEET: (
-        "This is for pre-literate LKG/UKG students: keep `text` to a single short instruction line "
-        '(e.g. "Circle the sense organs") or empty. Populate `grid_layout`: pick `kind` '
-        "(grid_2x4 / two_column_match / single_row) and `response_style` (circle_choice / blank_line / "
-        "match_lines) fitting the instruction. For EACH grid item's `visual`, invent a FRESH, SPECIFIC, "
-        "PARAMETERIZED image prompt varying style/action/background every time — never reuse a generic "
-        'label as the prompt (e.g. for "frog" write "minimalist black line art of a frog sitting on a '
-        'lily pad, white background", not just "frog"). Set `is_correct` on grid items that are the right '
-        "answer(s) for choice-selection layouts. Leave `options`, `correct_answer`, `match_pairs`, `is_true` empty."
+        "This is for pre-literate LKG/UKG students. Set `text` to a short instruction line only, e.g. "
+        '"Circle the sense organs" — a few words, NEVER an explanation of your reasoning or choices.\n'
+        "Populate `grid_layout.items` with a JSON array of picture items — this is the single most "
+        "important part of your answer, it must NEVER be left empty:\n"
+        '- `kind`: "grid_2x4" -> put 4 items in the array. "two_column_match" -> put 4 items. '
+        '"single_row" -> put 3 items.\n'
+        "- `response_style`: circle_choice / blank_line / match_lines, matching the instruction.\n"
+        '- `instruction`: leave this exactly identical to `text` above.\n'
+        "- Each array element is one picture: `visual.subject` is a one-or-two-word label (e.g. \"frog\"), "
+        "and `visual.full_prompt` is a FRESH, SPECIFIC image description varying style/action/background "
+        'every time — never a bare label (e.g. "minimalist black line art of a frog sitting on a lily pad, '
+        'white background", not just "frog").\n'
+        "- Set `is_correct` true/false on every array element for choice-selection layouts.\n"
+        "Leave `options`, `correct_answer`, `match_pairs`, `is_true` empty."
     ),
 }
 
@@ -147,10 +153,15 @@ def _resolve_diagram(diagram):
         return diagram.model_copy(update={"render_error": str(exc)})
 
 
-def _resolve_grid_layout(grid_layout):
+def _resolve_grid_layout(grid_layout, instruction_text: str | None = None):
     """Renders (currently: placeholder-renders) each grid item's image
     prompt and fills in image_id. A single failed item just gets left with
-    image_id=None rather than aborting the whole worksheet."""
+    image_id=None rather than aborting the whole worksheet.
+
+    `instruction` is forced to the question's own `text` rather than trusted
+    to the model's own `instruction` field: Gemini has been observed dumping
+    its full chain-of-thought reasoning into that free-text field instead of
+    the short line requested, so it is never surfaced to students."""
     if grid_layout is None:
         return None
     resolved_items = []
@@ -161,7 +172,7 @@ def _resolve_grid_layout(grid_layout):
         except Exception:  # noqa: BLE001 - one bad prompt shouldn't sink the worksheet
             visual = item.visual
         resolved_items.append(item.model_copy(update={"visual": visual}))
-    return grid_layout.model_copy(update={"items": resolved_items})
+    return grid_layout.model_copy(update={"items": resolved_items, "instruction": instruction_text})
 
 
 def _co_section(course_outcomes: list[CourseOutcome] | None) -> str:
@@ -240,6 +251,14 @@ def generate_section_questions(
         resolved_bloom_level = (
             BloomLevel.REMEMBER if draft.question_type == QuestionType.VISUAL_WORKSHEET else BloomLevel[draft.bloom_level]
         )
+        resolved_grid_layout = _resolve_grid_layout(draft.grid_layout, instruction_text=draft.text)
+        # An empty grid is a genuinely unusable worksheet (nothing to show/circle) -
+        # drop it from this batch rather than returning a broken question, mirroring
+        # how a single bad diagram doesn't abort the whole generation request.
+        if draft.question_type == QuestionType.VISUAL_WORKSHEET and (
+            resolved_grid_layout is None or len(resolved_grid_layout.items) == 0
+        ):
+            continue
         questions.append(
             Question(
                 id=str(uuid.uuid4()),
@@ -256,7 +275,7 @@ def generate_section_questions(
                 match_right_order=match_right_order,
                 is_true=draft.is_true,
                 diagram=_resolve_diagram(draft.diagram),
-                grid_layout=_resolve_grid_layout(draft.grid_layout),
+                grid_layout=resolved_grid_layout,
             )
         )
 

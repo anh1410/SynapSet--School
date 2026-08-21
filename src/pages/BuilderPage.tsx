@@ -19,6 +19,9 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { MatchFollowingTable } from "@/components/MatchFollowingTable";
+import { DiagramImage } from "@/components/DiagramImage";
+import { VisualWorksheetGrid } from "@/components/VisualWorksheetGrid";
+import { LatexText } from "@/components/LatexText";
 import {
   DEFAULT_MARKS,
   DIFFICULTY_LABELS,
@@ -573,7 +576,15 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
                         >
                           <Checkbox checked={!excluded} onCheckedChange={() => toggleExcluded(res.question.id)} />
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm text-foreground">{res.question.text}</p>
+                            <p className="text-sm text-foreground">
+                              <LatexText text={res.question.text} />
+                            </p>
+                            {res.question.question_type === "stem_diagram" && res.question.diagram && (
+                              <DiagramImage diagram={res.question.diagram} />
+                            )}
+                            {res.question.question_type === "visual_worksheet" && res.question.grid_layout && (
+                              <VisualWorksheetGrid layout={res.question.grid_layout} showAnswers />
+                            )}
                             {res.question.question_type === "mcq" && res.question.options && (
                               <ul className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
                                 {res.question.options.map((opt, oi) => (

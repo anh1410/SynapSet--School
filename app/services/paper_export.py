@@ -7,6 +7,7 @@ from PIL import Image as PILImage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.platypus import Flowable
 from reportlab.platypus import Image as RLImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -121,6 +122,24 @@ def _response_glyph(response_style: ResponseStyle) -> str:
     if response_style == ResponseStyle.BLANK_LINE:
         return "_______"
     return ""  # match_lines: no per-cell glyph, the grid layout itself implies pairing
+
+
+class _CircleMarker(Flowable):
+    """Draws a real vector circle instead of a text glyph: reportlab's base-14
+    PDF fonts (WinAnsiEncoding) don't cover U+25EF (large circle) or U+2713
+    (check mark), so embedding them as Paragraph text renders as a missing-glyph
+    box in the exported PDF. python-docx's Word fonts don't have this problem,
+    so _response_glyph's Unicode glyphs are kept for the DOCX path."""
+
+    def __init__(self, diameter: float = 12, filled: bool = False):
+        super().__init__()
+        self.diameter = diameter
+        self.filled = filled
+        self.width = self.height = diameter + 4
+
+    def draw(self) -> None:
+        r = self.diameter / 2
+        self.canv.circle(self.width / 2, self.height / 2, r, stroke=1, fill=1 if self.filled else 0)
 
 
 def export_paper_pdf(
@@ -251,7 +270,6 @@ def _pdf_diagram_flowables(q: Question, styles) -> list:
 def _pdf_grid_table(q: Question, styles, include_answers: bool) -> Table:
     layout = q.grid_layout
     cols = _grid_cols(layout.kind, len(layout.items))
-    glyph = _response_glyph(layout.response_style)
 
     cells = []
     for item in layout.items:
@@ -264,11 +282,15 @@ def _pdf_grid_table(q: Question, styles, include_answers: bool) -> Table:
             cell_parts.append(RLImage(str(path), width=w * scale, height=h * scale))
         if item.label:
             cell_parts.append(Paragraph(item.label, styles["Normal"]))
-        if glyph:
-            marker = f"✓ {glyph}" if include_answers and item.is_correct else glyph
-            cell_parts.append(Paragraph(marker, styles["Normal"]))
-        elif include_answers and item.is_correct:
-            cell_parts.append(Paragraph("✓ correct", styles["Normal"]))
+        marked_correct = include_answers and bool(item.is_correct)
+        if layout.response_style == ResponseStyle.CIRCLE_CHOICE:
+            cell_parts.append(_CircleMarker(filled=marked_correct))
+        elif layout.response_style == ResponseStyle.BLANK_LINE:
+            cell_parts.append(Paragraph("_______", styles["Normal"]))
+            if marked_correct:
+                cell_parts.append(Paragraph("Correct answer", styles["Normal"]))
+        elif marked_correct:
+            cell_parts.append(Paragraph("Correct answer", styles["Normal"]))
         cells.append(cell_parts)
 
     while len(cells) % cols != 0:

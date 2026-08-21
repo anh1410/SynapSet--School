@@ -68,7 +68,8 @@ export function QuestionEditor({
       {(question.question_type === "short_answer" ||
         question.question_type === "long_answer" ||
         question.question_type === "numerical" ||
-        question.question_type === "fill_in_blank") && (
+        question.question_type === "fill_in_blank" ||
+        question.question_type === "stem_diagram") && (
         <div>
           <label className="mb-1 block text-[11px] font-medium text-muted-foreground">
             {question.question_type === "fill_in_blank" ? "Blank answer" : "Model answer"}

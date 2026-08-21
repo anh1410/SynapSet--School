@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { clearSession, getToken } from "@/lib/session";
 
 const BASE = "/api/v1";
@@ -26,7 +27,9 @@ export type QuestionType =
   | "numerical"
   | "fill_in_blank"
   | "match_following"
-  | "true_false";
+  | "true_false"
+  | "stem_diagram"
+  | "visual_worksheet";
 
 export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   mcq: "Multiple Choice",
@@ -36,6 +39,8 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   fill_in_blank: "Fill in the Blanks",
   match_following: "Match the Following",
   true_false: "True or False",
+  stem_diagram: "STEM / Math Diagram",
+  visual_worksheet: "Visual Worksheet (LKG/UKG)",
 };
 
 // Canonical display order for question formats, shared by the Builder and Bank pages.
@@ -47,6 +52,8 @@ export const QUESTION_TYPE_ORDER: QuestionType[] = [
   "long_answer",
   "mcq",
   "numerical",
+  "stem_diagram",
+  "visual_worksheet",
 ];
 
 export type Difficulty = "easy" | "medium" | "hard";
@@ -68,6 +75,8 @@ export const DEFAULT_MARKS: Record<QuestionType, number> = {
   long_answer: 7,
   mcq: 4,
   numerical: 4,
+  stem_diagram: 5,
+  visual_worksheet: 1,
 };
 
 // ---------- Core resources ----------
@@ -75,6 +84,41 @@ export const DEFAULT_MARKS: Record<QuestionType, number> = {
 export interface MatchPair {
   left: string;
   right: string;
+}
+
+export type DiagramKind = "matplotlib" | "tikz";
+
+export interface DiagramSpec {
+  kind: DiagramKind;
+  source_code: string;
+  image_id: string | null;
+  caption: string | null;
+  render_error: string | null;
+}
+
+export interface VisualPrompt {
+  subject: string;
+  style: string;
+  action: string | null;
+  background: string | null;
+  full_prompt: string;
+  image_id: string | null;
+}
+
+export interface GridItem {
+  visual: VisualPrompt;
+  label: string | null;
+  is_correct: boolean | null;
+}
+
+export type GridLayoutKind = "grid_2x4" | "two_column_match" | "single_row";
+export type ResponseStyle = "circle_choice" | "blank_line" | "match_lines";
+
+export interface GridLayout {
+  kind: GridLayoutKind;
+  items: GridItem[];
+  response_style: ResponseStyle;
+  instruction: string | null;
 }
 
 export interface Question {
@@ -97,6 +141,8 @@ export interface Question {
   is_duplicate_of: string | null;
   source_document: string | null;
   created_at: string;
+  diagram: DiagramSpec | null;
+  grid_layout: GridLayout | null;
 }
 
 export interface DifficultyScore {
@@ -295,6 +341,37 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+/** Fetches an image by id with the auth header attached (an <img src> can't carry one)
+ *  and hands back an object URL. Returns null while loading or if imageId is null/fetch fails. */
+export function useImageUrl(imageId: string | null | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!imageId) {
+      setUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    fetch(`${BASE}/images/${imageId}`, { headers: authHeaders() })
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error("image fetch failed"))))
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setUrl(null);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageId]);
+
+  return url;
 }
 
 async function downloadFromResponse(res: Response, fallbackName: string) {

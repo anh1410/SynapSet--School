@@ -8,6 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { QuestionEditor } from "@/components/QuestionEditor";
 import { MatchFollowingTable } from "@/components/MatchFollowingTable";
+import { DiagramImage } from "@/components/DiagramImage";
+import { VisualWorksheetGrid } from "@/components/VisualWorksheetGrid";
+import { LatexText } from "@/components/LatexText";
 import {
   difficultyBucket,
   exportBlueprint,
@@ -194,7 +197,13 @@ export function ReviewExportPage({
                                     </div>
                                   ) : (
                                     <>
-                                      <p className="text-sm leading-relaxed text-foreground">{q.text}</p>
+                                      <p className="text-sm leading-relaxed text-foreground">
+                                        <LatexText text={q.text} />
+                                      </p>
+                                      {q.question_type === "stem_diagram" && q.diagram && <DiagramImage diagram={q.diagram} />}
+                                      {q.question_type === "visual_worksheet" && q.grid_layout && (
+                                        <VisualWorksheetGrid layout={q.grid_layout} showAnswers={variant === "answer_key"} />
+                                      )}
                                       {q.question_type === "mcq" && q.options && (
                                         <ul className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
                                           {q.options.map((opt, oi) => (
@@ -214,9 +223,12 @@ export function ReviewExportPage({
                                         (q.question_type === "short_answer" ||
                                           q.question_type === "long_answer" ||
                                           q.question_type === "numerical" ||
-                                          q.question_type === "fill_in_blank") &&
+                                          q.question_type === "fill_in_blank" ||
+                                          q.question_type === "stem_diagram") &&
                                         q.correct_answer && (
-                                          <p className="mt-1 text-xs font-medium text-success">Answer: {q.correct_answer}</p>
+                                          <p className="mt-1 text-xs font-medium text-success">
+                                            Answer: <LatexText text={q.correct_answer} />
+                                          </p>
                                         )}
                                     </>
                                   )}
