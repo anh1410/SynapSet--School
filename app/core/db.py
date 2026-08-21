@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS questions (
     match_pairs TEXT,
     match_right_order TEXT,
     is_true INTEGER,
+    diagram TEXT,
+    grid_layout TEXT,
     difficulty_score REAL,
     embedding_id TEXT,
     is_duplicate_of TEXT,
@@ -88,11 +90,28 @@ CREATE TABLE IF NOT EXISTS paper_templates (
 """
 
 
+# Columns added after a table's original CREATE TABLE shipped. CREATE TABLE
+# IF NOT EXISTS only helps brand-new databases; existing ones need each
+# column added explicitly. Safe to re-run — duplicate-column errors are
+# swallowed.
+_MIGRATIONS = [
+    "ALTER TABLE questions ADD COLUMN diagram TEXT",
+    "ALTER TABLE questions ADD COLUMN grid_layout TEXT",
+]
+
+
 def _connect(path: str) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_SQL)
+    for migration in _MIGRATIONS:
+        try:
+            conn.execute(migration)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc):
+                raise
+    conn.commit()
     return conn
 
 

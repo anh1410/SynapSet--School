@@ -13,6 +13,8 @@ def _row_to_question(row) -> Question:
     d["match_pairs"] = load(d["match_pairs"])
     d["match_right_order"] = load(d["match_right_order"])
     d["is_true"] = bool(d["is_true"]) if d["is_true"] is not None else None
+    d["diagram"] = load(d.get("diagram"))
+    d["grid_layout"] = load(d.get("grid_layout"))
     return Question.model_validate(d)
 
 
@@ -32,6 +34,8 @@ def _question_params(q: Question) -> tuple:
         dump([p.model_dump(mode="json") for p in q.match_pairs]) if q.match_pairs is not None else None,
         dump(q.match_right_order) if q.match_right_order is not None else None,
         int(q.is_true) if q.is_true is not None else None,
+        dump(q.diagram.model_dump(mode="json")) if q.diagram is not None else None,
+        dump(q.grid_layout.model_dump(mode="json")) if q.grid_layout is not None else None,
         q.difficulty_score,
         q.embedding_id,
         q.is_duplicate_of,
@@ -53,8 +57,9 @@ class QuestionBank:
                 """INSERT INTO questions (
                     id, subject_id, text, question_type, marks, bloom_level, topic_ids, co_ids,
                     unit, options, correct_answer, match_pairs, match_right_order, is_true,
+                    diagram, grid_layout,
                     difficulty_score, embedding_id, is_duplicate_of, source_document, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     subject_id = excluded.subject_id, text = excluded.text,
                     question_type = excluded.question_type, marks = excluded.marks,
@@ -62,6 +67,7 @@ class QuestionBank:
                     co_ids = excluded.co_ids, unit = excluded.unit, options = excluded.options,
                     correct_answer = excluded.correct_answer, match_pairs = excluded.match_pairs,
                     match_right_order = excluded.match_right_order, is_true = excluded.is_true,
+                    diagram = excluded.diagram, grid_layout = excluded.grid_layout,
                     difficulty_score = excluded.difficulty_score, embedding_id = excluded.embedding_id,
                     is_duplicate_of = excluded.is_duplicate_of, source_document = excluded.source_document,
                     created_at = excluded.created_at""",
