@@ -76,8 +76,15 @@ def _render_worker(source: str, conn) -> None:
             # work (the prompt asks Gemini to rely on the pre-injected plt/np instead,
             # but it doesn't always comply, so a redundant `import numpy as np` etc.
             # must not crash the render with a bare "__import__ not found").
+            #
+            # `import matplotlib.pyplot as plt` compiles to IMPORT_NAME("matplotlib.pyplot")
+            # followed by an IMPORT_FROM that does getattr(<returned>, "pyplot") itself -
+            # so this must return the top-level `matplotlib` package (with `.pyplot`
+            # already attached as an attribute, since it's imported above), not the
+            # pyplot module directly, or that getattr raises "cannot import name
+            # 'pyplot' from 'matplotlib.pyplot'".
             if name in ("numpy", "math", "matplotlib", "matplotlib.pyplot"):
-                return {"numpy": np, "math": math, "matplotlib": matplotlib, "matplotlib.pyplot": plt}[name]
+                return {"numpy": np, "math": math, "matplotlib": matplotlib, "matplotlib.pyplot": matplotlib}[name]
             raise ImportError(f"import not allowed: {name}")
 
         safe_globals = {
