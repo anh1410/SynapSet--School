@@ -6,6 +6,7 @@ import { UploadPage } from "@/pages/UploadPage";
 import { AnalysisPage } from "@/pages/AnalysisPage";
 import { BankPage } from "@/pages/BankPage";
 import { BuilderPage } from "@/pages/BuilderPage";
+import { TemplatesPage } from "@/pages/TemplatesPage";
 import { ReviewExportPage } from "@/pages/ReviewExportPage";
 import { AuthPage } from "@/pages/AuthPage";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ export type Page =
   | "analysis"
   | "bank"
   | "builder"
+  | "templates"
   | "review";
 
 function FirstSubjectGate() {
@@ -71,6 +73,7 @@ function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeBlueprintId, setActiveBlueprintId] = useState<string | null>(null);
   const [bankSearch, setBankSearch] = useState<string | undefined>(undefined);
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
 
   const goToReview = (blueprintId: string) => {
     setActiveBlueprintId(blueprintId);
@@ -80,6 +83,11 @@ function AppShell() {
   const goToBankSearch = (query: string) => {
     setBankSearch(query);
     setPage("bank");
+  };
+
+  const useTemplate = (templateId: string) => {
+    setPendingTemplateId(templateId);
+    setPage("builder");
   };
 
   return (
@@ -105,7 +113,14 @@ function AppShell() {
             {page === "upload" && <UploadPage />}
             {page === "analysis" && <AnalysisPage />}
             {page === "bank" && <BankPage initialSearch={bankSearch} onPaperCreated={goToReview} />}
-            {page === "builder" && <BuilderPage onSaved={goToReview} />}
+            {page === "builder" && (
+              <BuilderPage
+                onSaved={goToReview}
+                applyTemplateId={pendingTemplateId}
+                onTemplateApplied={() => setPendingTemplateId(null)}
+              />
+            )}
+            {page === "templates" && <TemplatesPage onUseTemplate={useTemplate} />}
             {page === "review" && (
               <ReviewExportPage blueprintId={activeBlueprintId} onNavigate={setPage} onSelectBlueprint={goToReview} />
             )}

@@ -20,6 +20,7 @@ const titles: Record<Page, { title: string; subtitle: string }> = {
   analysis: { title: "Topic Analysis", subtitle: "Coverage, relationships, and neglected areas" },
   bank: { title: "Question Bank", subtitle: "Browse and manage tagged questions" },
   builder: { title: "Question Paper Builder", subtitle: "Configure sections, generate questions, and assemble your paper" },
+  templates: { title: "Templates", subtitle: "Manage reusable section patterns for the Question Paper Builder" },
   review: { title: "Review & Export", subtitle: "Finalize and export the exam paper" },
 };
 

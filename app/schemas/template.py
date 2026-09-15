@@ -2,14 +2,16 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from app.schemas.draft import Difficulty
+from app.schemas.draft import Difficulty, SectionMode
 from app.schemas.question import QuestionType
 
 
 class TemplateSection(BaseModel):
     question_format: QuestionType
-    count: int
-    difficulty: Difficulty = "medium"
+    mode: SectionMode = "specific"
+    difficulties: list[Difficulty] = Field(default_factory=list)  # mode == "specific": one per planned question
+    difficulty: Difficulty = "medium"  # mode == "random"
+    count: int = 3  # mode == "random"
     marks_per_question: int
 
 

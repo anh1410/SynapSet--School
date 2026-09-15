@@ -60,3 +60,38 @@ def test_execute_rejects_unsafe_code_before_running():
 def test_execute_times_out_on_infinite_loop():
     with pytest.raises(DiagramTimeoutError):
         execute_matplotlib_diagram("while True:\n    pass", timeout_seconds=3)
+
+
+def test_execute_allows_matplotlib_patches_for_geometry():
+    # matplotlib.patches (Circle/Polygon/Arc/...) is the standard way to draw
+    # shapes for geometry diagrams and was previously rejected outright.
+    png = execute_matplotlib_diagram(
+        "import matplotlib.patches as patches\n"
+        "ax = plt.gca()\n"
+        "ax.add_patch(patches.Circle((0.5, 0.5), 0.3, fill=False))\n"
+        "ax.set_xlim(0, 1)\n"
+        "ax.set_ylim(0, 1)\n",
+        timeout_seconds=30,
+    )
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_execute_allows_common_builtins():
+    # zip/round/min/max/etc are near-universal in plotting loops and were
+    # previously missing from the sandboxed __builtins__, crashing with
+    # NameError on completely ordinary diagram code.
+    png = execute_matplotlib_diagram(
+        "xs = [0.1, 0.4, 0.7]\n"
+        "ys = [0.2, 0.5, 0.8]\n"
+        "for x, y in zip(xs, ys):\n"
+        "    plt.plot(x, y, marker='o')\n"
+        "plt.title(f'max={round(max(ys), 2)}')\n",
+        timeout_seconds=30,
+    )
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_dangerous_builtins_still_blocked():
+    for call in ("eval('1')", "exec('1')", "open('x')", "__import__('os')"):
+        with pytest.raises(UnsafeDiagramCodeError):
+            execute_matplotlib_diagram(call, timeout_seconds=10)

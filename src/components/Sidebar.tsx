@@ -5,6 +5,7 @@ import {
   Library,
   FileStack,
   FileCheck2,
+  LayoutTemplate,
   Settings,
   X,
   GraduationCap,
@@ -18,6 +19,7 @@ const nav: { id: Page; label: string; icon: typeof LayoutGrid }[] = [
   { id: "analysis", label: "Topic Analysis", icon: Network },
   { id: "bank", label: "Question Bank", icon: Library },
   { id: "builder", label: "Question Paper Builder", icon: FileStack },
+  { id: "templates", label: "Templates", icon: LayoutTemplate },
   { id: "review", label: "Review & Export", icon: FileCheck2 },
 ];
 

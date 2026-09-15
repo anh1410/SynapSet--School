@@ -34,45 +34,77 @@ import {
   difficultyBucket,
   fetchGraph,
   fetchQuestions,
+  generateQuestions,
   generateSection,
   getDraft,
   listTemplates,
   putDraft,
   type BuilderDraft,
   type Difficulty,
+  type DraftQuestionSpec,
   type DraftSection,
   type GeneratedQuestionResult,
   type GraphNode,
   type PaperTemplate,
   type QuestionType,
+  type SectionMode,
 } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
 
 const questionFormats: QuestionType[] = QUESTION_TYPE_ORDER;
+const sectionModes: { value: SectionMode; label: string }[] = [
+  { value: "specific", label: "Specific" },
+  { value: "random", label: "Random" },
+];
+
+interface QuestionResultItem {
+  specId: string;
+  requestedLabel: string;
+  result: GeneratedQuestionResult | null;
+  error: string | null;
+}
 
 interface SectionResult {
   sectionId: string;
-  results: GeneratedQuestionResult[];
-  error: string | null;
+  items: QuestionResultItem[];
 }
 
 let sectionIdCounter = 0;
 const newSectionId = () => `section-${Date.now()}-${++sectionIdCounter}`;
 
+let questionIdCounter = 0;
+const newQuestionSpecId = () => `q-${Date.now()}-${++questionIdCounter}`;
+
+function makeQuestionSpec(topics: GraphNode[]): DraftQuestionSpec {
+  return { id: newQuestionSpecId(), topic_id: topics[0]?.id ?? "", difficulty: "medium" };
+}
+
 function makeSection(topics: GraphNode[]): DraftSection {
   return {
     id: newSectionId(),
     question_format: "short_answer",
-    count: 3,
+    mode: "random",
+    questions: [makeQuestionSpec(topics)],
     topic_ids: topics[0] ? [topics[0].id] : [],
     difficulty: "medium",
+    count: 3,
     marks_per_question: DEFAULT_MARKS.short_answer,
     generated_question_ids: [],
   };
 }
 
-export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => void }) {
+const sectionQuestionCount = (sec: DraftSection) => (sec.mode === "specific" ? sec.questions.length : sec.count);
+
+export function BuilderPage({
+  onSaved,
+  applyTemplateId,
+  onTemplateApplied,
+}: {
+  onSaved: (blueprintId: string) => void;
+  applyTemplateId?: string | null;
+  onTemplateApplied?: () => void;
+}) {
   const { activeSubjectId } = useAuth();
   const [topics, setTopics] = useState<GraphNode[]>([]);
   const [paperName, setPaperName] = useState(`Question Paper — ${new Date().toLocaleDateString()}`);
@@ -97,6 +129,9 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
     listTemplates().then(setTemplates).catch(() => {});
   }, []);
 
+  const topicName = (id: string) => topics.find((t) => t.id === id)?.name ?? id;
+  const topicNames = (ids: string[]) => ids.map(topicName).join(", ");
+
   // Load topics + rehydrate any existing draft for this subject.
   useEffect(() => {
     if (!activeSubjectId) return;
@@ -104,9 +139,18 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
     fetchGraph(activeSubjectId).then(async (g) => {
       if (cancelled) return;
       setTopics(g.nodes);
+      const nameOf = (id: string) => g.nodes.find((t) => t.id === id)?.name ?? id;
 
       const [draft, allQuestions] = await Promise.all([getDraft(activeSubjectId), fetchQuestions(activeSubjectId)]);
       if (cancelled) return;
+
+      // A pending "Use in Builder" template takes precedence over any saved
+      // draft — that effect (below) sets sections once templates load, so
+      // skip rehydrating/defaulting here to avoid a load race clobbering it.
+      if (applyTemplateId) {
+        setDraftLoaded(true);
+        return;
+      }
 
       if (draft && draft.sections.length > 0) {
         draftIdRef.current = draft.id;
@@ -115,24 +159,31 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
         setSections(draft.sections);
 
         const byId = new Map(allQuestions.map((q) => [q.id, q]));
-        const rehydrated: SectionResult[] = draft.sections.map((s) => ({
-          sectionId: s.id,
-          error: null,
-          results: s.generated_question_ids
-            .map((qid) => byId.get(qid))
-            .filter((q): q is NonNullable<typeof q> => Boolean(q))
-            .map((q) => ({
-              question: q,
-              difficulty: {
-                score: q.difficulty_score ?? 5,
-                features: {},
-                shap_contributions: null,
-                method: "heuristic" as const,
-              },
-              duplicate_matches: [],
-            })),
-        }));
-        if (rehydrated.some((r) => r.results.length > 0)) {
+        const rehydrated: SectionResult[] = draft.sections.map((s) => {
+          const poolLabel = s.topic_ids.map(nameOf).join(", ");
+          return {
+            sectionId: s.id,
+            items: s.generated_question_ids
+              .map((qid) => byId.get(qid))
+              .filter((q): q is NonNullable<typeof q> => Boolean(q))
+              .map((q, idx) => ({
+                specId: s.mode === "specific" ? s.questions[idx]?.id ?? q.id : q.id,
+                requestedLabel: s.mode === "specific" ? nameOf(s.questions[idx]?.topic_id ?? "") : poolLabel,
+                error: null,
+                result: {
+                  question: q,
+                  difficulty: {
+                    score: q.difficulty_score ?? 5,
+                    features: {},
+                    shap_contributions: null,
+                    method: "heuristic" as const,
+                  },
+                  duplicate_matches: [],
+                },
+              })),
+          };
+        });
+        if (rehydrated.some((r) => r.items.length > 0)) {
           setSectionResults(rehydrated);
           setHasGenerated(true);
         }
@@ -194,6 +245,34 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
   const updateSection = <K extends keyof DraftSection>(id: string, key: K, value: DraftSection[K]) =>
     setSections((s) => s.map((sec) => (sec.id === id ? { ...sec, [key]: value } : sec)));
 
+  const setSectionMode = (id: string, mode: SectionMode) => updateSection(id, "mode", mode);
+
+  const addQuestion = (sectionId: string) =>
+    setSections((s) =>
+      s.map((sec) => (sec.id === sectionId ? { ...sec, questions: [...sec.questions, makeQuestionSpec(topics)] } : sec))
+    );
+
+  const removeQuestion = (sectionId: string, questionId: string) =>
+    setSections((s) =>
+      s.map((sec) =>
+        sec.id === sectionId ? { ...sec, questions: sec.questions.filter((q) => q.id !== questionId) } : sec
+      )
+    );
+
+  const updateQuestion = <K extends keyof DraftQuestionSpec>(
+    sectionId: string,
+    questionId: string,
+    key: K,
+    value: DraftQuestionSpec[K]
+  ) =>
+    setSections((s) =>
+      s.map((sec) =>
+        sec.id === sectionId
+          ? { ...sec, questions: sec.questions.map((q) => (q.id === questionId ? { ...q, [key]: value } : q)) }
+          : sec
+      )
+    );
+
   const toggleSectionTopic = (id: string, topicId: string) =>
     setSections((s) =>
       s.map((sec) => {
@@ -215,9 +294,14 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
       template.sections.map((ts) => ({
         id: newSectionId(),
         question_format: ts.question_format,
-        count: ts.count,
+        mode: ts.mode,
+        questions:
+          ts.mode === "specific"
+            ? ts.difficulties.map((d) => ({ id: newQuestionSpecId(), topic_id: topics[0]?.id ?? "", difficulty: d }))
+            : [],
         topic_ids: [],
-        difficulty: ts.difficulty,
+        difficulty: ts.mode === "random" ? ts.difficulty : "medium",
+        count: ts.mode === "random" ? ts.count : 3,
         marks_per_question: ts.marks_per_question,
         generated_question_ids: [],
       }))
@@ -226,6 +310,16 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
     setSectionResults([]);
     setHasGenerated(false);
   };
+
+  // Arriving here from the Templates page ("Use in Builder") — apply it once
+  // the template list has loaded, then clear the pending id so it doesn't
+  // reapply on every render or hop back if the teacher revisits Templates.
+  useEffect(() => {
+    if (!applyTemplateId || templates.length === 0) return;
+    applyTemplate(applyTemplateId);
+    onTemplateApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyTemplateId, templates]);
 
   const handleSaveTemplate = async () => {
     if (!savingTemplateName || !savingTemplateName.trim() || sections.length === 0) return;
@@ -236,8 +330,10 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
         duration_minutes: duration,
         sections: sections.map((s) => ({
           question_format: s.question_format,
-          count: s.count,
-          difficulty: s.difficulty,
+          mode: s.mode,
+          difficulties: s.mode === "specific" ? s.questions.map((q) => q.difficulty) : [],
+          difficulty: s.mode === "random" ? s.difficulty : "medium",
+          count: s.mode === "random" ? s.count : s.questions.length,
           marks_per_question: s.marks_per_question,
         })),
       });
@@ -248,14 +344,47 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
     }
   };
 
-  const topicName = (id: string) => topics.find((t) => t.id === id)?.name ?? id;
+  const plannedQuestions = sections.reduce((s, sec) => s + sectionQuestionCount(sec), 0);
+  const plannedMarks = sections.reduce((s, sec) => s + sectionQuestionCount(sec) * sec.marks_per_question, 0);
 
-  const plannedQuestions = sections.reduce((s, sec) => s + sec.count, 0);
-  const plannedMarks = sections.reduce((s, sec) => s + sec.count * sec.marks_per_question, 0);
+  const runQuestionSpec = async (section: DraftSection, spec: DraftQuestionSpec): Promise<QuestionResultItem> => {
+    const label = `${topicName(spec.topic_id)} (${DIFFICULTY_LABELS[spec.difficulty]})`;
+    if (!activeSubjectId || !spec.topic_id) {
+      return { specId: spec.id, requestedLabel: label, result: null, error: "Select a topic" };
+    }
+    try {
+      const { results } = await generateQuestions({
+        subject_id: activeSubjectId,
+        topic: topicName(spec.topic_id),
+        num_questions: 1,
+        question_type: section.question_format,
+        difficulty: spec.difficulty,
+        marks: section.marks_per_question,
+        check_duplicates: true,
+        save_to_bank: true,
+      });
+      return {
+        specId: spec.id,
+        requestedLabel: label,
+        result: results[0] ?? null,
+        error: results.length === 0 ? "No question returned" : null,
+      };
+    } catch (e) {
+      return { specId: spec.id, requestedLabel: label, result: null, error: e instanceof Error ? e.message : "Generation failed" };
+    }
+  };
 
-  const runSection = async (section: DraftSection): Promise<SectionResult> => {
+  const runSpecificSection = async (section: DraftSection): Promise<SectionResult> => {
+    const items = await Promise.all(section.questions.map((spec) => runQuestionSpec(section, spec)));
+    const ids = items.filter((i) => i.result).map((i) => i.result!.question.id);
+    persistGeneratedIds(section.id, ids);
+    return { sectionId: section.id, items };
+  };
+
+  const runRandomSection = async (section: DraftSection): Promise<SectionResult> => {
+    const label = `${topicNames(section.topic_ids)} (${DIFFICULTY_LABELS[section.difficulty]})`;
     if (!activeSubjectId || section.topic_ids.length === 0) {
-      return { sectionId: section.id, results: [], error: "Select at least one topic" };
+      return { sectionId: section.id, items: [{ specId: section.id, requestedLabel: label, result: null, error: "Select at least one topic" }] };
     }
     try {
       const { results } = await generateSection({
@@ -268,12 +397,22 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
         check_duplicates: true,
         save_to_bank: true,
       });
-      persistGeneratedIds(section.id, results.map((r) => r.question.id));
-      return { sectionId: section.id, results, error: results.length === 0 ? "No questions returned" : null };
+      const items: QuestionResultItem[] =
+        results.length === 0
+          ? [{ specId: section.id, requestedLabel: label, result: null, error: "No questions returned" }]
+          : results.map((r) => ({ specId: r.question.id, requestedLabel: label, result: r, error: null }));
+      persistGeneratedIds(section.id, items.filter((i) => i.result).map((i) => i.result!.question.id));
+      return { sectionId: section.id, items };
     } catch (e) {
-      return { sectionId: section.id, results: [], error: e instanceof Error ? e.message : "Generation failed" };
+      return {
+        sectionId: section.id,
+        items: [{ specId: section.id, requestedLabel: label, result: null, error: e instanceof Error ? e.message : "Generation failed" }],
+      };
     }
   };
+
+  const runSection = (section: DraftSection): Promise<SectionResult> =>
+    section.mode === "specific" ? runSpecificSection(section) : runRandomSection(section);
 
   const generatePaper = async () => {
     setGenerating(true);
@@ -305,9 +444,11 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
       return next;
     });
 
-  const finalQuestions = sectionResults.flatMap((r) => r.results.map((res) => res.question)).filter((q) => !excludedIds.has(q.id));
+  const finalQuestions = sectionResults
+    .flatMap((r) => r.items.map((i) => i.result?.question).filter((q): q is NonNullable<typeof q> => Boolean(q)))
+    .filter((q) => !excludedIds.has(q.id));
   const finalMarks = finalQuestions.reduce((s, q) => s + q.marks, 0);
-  const anySectionError = sectionResults.some((r) => r.error);
+  const anySectionError = sectionResults.some((r) => r.items.some((i) => i.error));
 
   const handleSavePaper = async () => {
     if (finalQuestions.length === 0 || !activeSubjectId) return;
@@ -315,9 +456,11 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
     try {
       const blueprintSections = sections.map((sec) => {
         const sr = sectionResults.find((r) => r.sectionId === sec.id);
-        const ids = (sr?.results ?? []).map((r) => r.question.id).filter((id) => !excludedIds.has(id));
+        const ids = (sr?.items ?? [])
+          .map((i) => i.result?.question.id)
+          .filter((id): id is string => Boolean(id) && !excludedIds.has(id!));
         return {
-          title: `${QUESTION_TYPE_LABELS[sec.question_format]} — ${sec.topic_ids.map(topicName).join(", ")}`,
+          title: QUESTION_TYPE_LABELS[sec.question_format],
           question_format: sec.question_format,
           question_ids: ids,
         };
@@ -397,66 +540,146 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground">
-                    Topic Coverage ({section.topic_ids.length} selected)
-                  </label>
-                  <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-border p-2 scrollbar-thin">
-                    {topics.length === 0 && <p className="text-[11px] text-muted-foreground">No topics yet — upload material first.</p>}
-                    {topics.map((t) => (
-                      <label key={t.id} className="flex items-center gap-2 text-xs text-foreground">
-                        <Checkbox
-                          checked={section.topic_ids.includes(t.id)}
-                          onCheckedChange={() => toggleSectionTopic(section.id, t.id)}
-                        />
-                        {t.name}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground">Difficulty</label>
+                  <label className="text-[11px] font-medium text-muted-foreground">Mode</label>
                   <div className="flex gap-1.5">
-                    {DIFFICULTY_LEVELS.map((d) => (
+                    {sectionModes.map((m) => (
                       <button
-                        key={d}
-                        onClick={() => updateSection(section.id, "difficulty", d as Difficulty)}
+                        key={m.value}
+                        onClick={() => setSectionMode(section.id, m.value)}
                         className={cn(
                           "flex-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
-                          section.difficulty === d
+                          section.mode === m.value
                             ? "border-primary bg-primary/10 text-primary"
                             : "border-border text-muted-foreground hover:bg-secondary/50"
                         )}
                       >
-                        {DIFFICULTY_LABELS[d]}
+                        {m.label}
                       </button>
                     ))}
                   </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {section.mode === "specific"
+                      ? "Choose the topic and difficulty for each question individually."
+                      : "Pick a topic pool and one difficulty — questions are drawn from it automatically."}
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">Questions</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={section.count}
-                      onChange={(e) => updateSection(section.id, "count", Math.max(1, Number(e.target.value)))}
-                    />
+                {section.mode === "specific" ? (
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-medium text-muted-foreground">
+                      Questions ({section.questions.length})
+                    </label>
+                    {topics.length === 0 && <p className="text-[11px] text-muted-foreground">No topics yet — upload material first.</p>}
+                    <div className="space-y-1.5">
+                      {section.questions.map((q, qIdx) => (
+                        <div key={q.id} className="flex items-center gap-1.5">
+                          <span className="w-4 shrink-0 text-[10px] text-muted-foreground">{qIdx + 1}.</span>
+                          <Select
+                            className="flex-1 text-xs"
+                            value={q.topic_id}
+                            onChange={(e) => updateQuestion(section.id, q.id, "topic_id", e.target.value)}
+                            disabled={topics.length === 0}
+                          >
+                            {topics.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </Select>
+                          <Select
+                            className="w-[92px] shrink-0 text-xs"
+                            value={q.difficulty}
+                            onChange={(e) => updateQuestion(section.id, q.id, "difficulty", e.target.value as Difficulty)}
+                          >
+                            {DIFFICULTY_LEVELS.map((d) => (
+                              <option key={d} value={d}>
+                                {DIFFICULTY_LABELS[d]}
+                              </option>
+                            ))}
+                          </Select>
+                          <button
+                            className="shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-30"
+                            onClick={() => removeQuestion(section.id, q.id)}
+                            disabled={section.questions.length <= 1}
+                            title="Remove question"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                      onClick={() => addQuestion(section.id)}
+                    >
+                      <Plus className="h-3 w-3" /> Add question
+                    </button>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-muted-foreground">Marks each</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={section.marks_per_question}
-                      onChange={(e) => updateSection(section.id, "marks_per_question", Math.max(1, Number(e.target.value)))}
-                    />
-                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-muted-foreground">
+                        Topic Coverage ({section.topic_ids.length} selected)
+                      </label>
+                      <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border border-border p-2 scrollbar-thin">
+                        {topics.length === 0 && <p className="text-[11px] text-muted-foreground">No topics yet — upload material first.</p>}
+                        {topics.map((t) => (
+                          <label key={t.id} className="flex items-center gap-2 text-xs text-foreground">
+                            <Checkbox
+                              checked={section.topic_ids.includes(t.id)}
+                              onCheckedChange={() => toggleSectionTopic(section.id, t.id)}
+                            />
+                            {t.name}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-muted-foreground">Difficulty</label>
+                      <div className="flex gap-1.5">
+                        {DIFFICULTY_LEVELS.map((d) => (
+                          <button
+                            key={d}
+                            onClick={() => updateSection(section.id, "difficulty", d as Difficulty)}
+                            className={cn(
+                              "flex-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
+                              section.difficulty === d
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border text-muted-foreground hover:bg-secondary/50"
+                            )}
+                          >
+                            {DIFFICULTY_LABELS[d]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-muted-foreground">Questions</label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={section.count}
+                        onChange={(e) => updateSection(section.id, "count", Math.max(1, Number(e.target.value)))}
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground">Marks each</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={section.marks_per_question}
+                    onChange={(e) => updateSection(section.id, "marks_per_question", Math.max(1, Number(e.target.value)))}
+                  />
                 </div>
 
                 <p className="text-[11px] text-muted-foreground">
-                  = {section.count} question{section.count !== 1 && "s"} · {section.count * section.marks_per_question} marks
+                  = {sectionQuestionCount(section)} question{sectionQuestionCount(section) !== 1 && "s"} ·{" "}
+                  {sectionQuestionCount(section) * section.marks_per_question} marks
                 </p>
               </div>
             ))}
@@ -548,7 +771,8 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
                     <div>
                       <CardTitle>Section {idx + 1} — {QUESTION_TYPE_LABELS[section.question_format]}</CardTitle>
                       <CardDescription>
-                        {section.topic_ids.map(topicName).join(", ")} · {DIFFICULTY_LABELS[section.difficulty]} · {section.marks_per_question} marks each
+                        {sectionQuestionCount(section)} question{sectionQuestionCount(section) !== 1 && "s"} ·{" "}
+                        {section.marks_per_question} marks each · {section.mode === "specific" ? "Specific" : "Random"}
                       </CardDescription>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => regenerateSection(sr.sectionId)} disabled={regeneratingSection === sr.sectionId}>
@@ -556,16 +780,20 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
                     </Button>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {sr.error && (
-                      <p className="flex items-center gap-1.5 text-xs text-destructive">
-                        <AlertTriangle className="h-3.5 w-3.5" /> {sr.error}
-                      </p>
-                    )}
-                    {sr.results.map((res) => {
+                    {sr.items.map((item) => {
+                      if (item.error || !item.result) {
+                        return (
+                          <p key={item.specId} className="flex items-center gap-1.5 text-xs text-destructive">
+                            <AlertTriangle className="h-3.5 w-3.5" /> {item.requestedLabel}: {item.error ?? "Generation failed"}
+                          </p>
+                        );
+                      }
+                      const res = item.result;
                       const excluded = excludedIds.has(res.question.id);
                       const bestMatch = res.duplicate_matches[0];
                       const isDuplicate = Boolean(bestMatch?.is_duplicate);
                       const bucket = difficultyBucket(res.question.difficulty_score);
+                      const topicLabel = res.question.topic_ids.length > 0 ? topicNames(res.question.topic_ids) : item.requestedLabel;
                       return (
                         <div
                           key={res.question.id}
@@ -601,6 +829,7 @@ export function BuilderPage({ onSaved }: { onSaved: (blueprintId: string) => voi
                               <p className="mt-1 text-xs text-muted-foreground">Answer: {res.question.is_true ? "True" : "False"}</p>
                             )}
                             <div className="mt-2 flex flex-wrap gap-1.5">
+                              <Badge variant="outline">{topicLabel}</Badge>
                               <Badge variant="outline">{res.question.marks} marks</Badge>
                               <Badge variant={bucket === "Hard" ? "destructive" : bucket === "Medium" ? "warning" : "success"}>{bucket}</Badge>
                               {isDuplicate && (

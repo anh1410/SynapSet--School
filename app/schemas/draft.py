@@ -6,14 +6,23 @@ from pydantic import BaseModel, Field
 from app.schemas.question import QuestionType
 
 Difficulty = Literal["easy", "medium", "hard"]
+SectionMode = Literal["specific", "random"]
+
+
+class DraftQuestionSpec(BaseModel):
+    id: str
+    topic_id: str
+    difficulty: Difficulty = "medium"
 
 
 class DraftSection(BaseModel):
     id: str
     question_format: QuestionType
-    count: int
-    topic_ids: list[str] = Field(default_factory=list)
-    difficulty: Difficulty = "medium"
+    mode: SectionMode = "specific"
+    questions: list[DraftQuestionSpec] = Field(default_factory=list)  # mode == "specific"
+    topic_ids: list[str] = Field(default_factory=list)  # mode == "random"
+    difficulty: Difficulty = "medium"  # mode == "random"
+    count: int = 3  # mode == "random"
     marks_per_question: int
     generated_question_ids: list[str] = Field(default_factory=list)
 

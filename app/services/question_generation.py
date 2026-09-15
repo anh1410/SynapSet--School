@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.graph_store import KnowledgeGraphStore, normalize_topic_name
 from app.core.image_store import save_image
 from app.core.llm import get_genai_client
+from app.core.question_bank import QuestionBank
 from app.schemas.bloom import BloomLevel
 from app.schemas.course_outcome import CourseOutcome
 from app.schemas.generation import QuestionDraftBatch
@@ -45,7 +46,14 @@ QUESTION_TYPE_INSTRUCTIONS: dict[QuestionType, str] = {
         "question needs a geometry/physics diagram, populate `diagram`: set `kind` to \"matplotlib\" "
         "(preferred) or \"tikz\", and put COMPLETE, SELF-CONTAINED, EXECUTABLE Python code in `source_code` "
         "using only `plt`/`np` (already imported) that draws into the current matplotlib figure — do NOT "
-        "call plt.savefig, plt.show, or any file/network APIs. Leave `diagram` null if no visual is needed. "
+        "call plt.savefig, plt.show, or any file/network APIs. "
+        "String-escaping rule for `source_code` (this is real Python, not LaTeX source): a plain string "
+        "like \"\\triangle ABC\" is NOT safe — Python reads \\t as a TAB character and silently eats the "
+        "'t', rendering as 'riangle ABC'. Inside `source_code`, NEVER put a LaTeX macro (\\triangle, "
+        "\\angle, \\alpha, \\degree, etc.) in a plain string. Instead either (a) use the literal Unicode "
+        "character directly — △ for triangle, ∠ for angle, α/β/θ for Greek letters, ° for degree — or "
+        "(b) if you need matplotlib mathtext, write the string with an r-prefix, e.g. r\"$\\triangle ABC$\". "
+        "Leave `diagram` null if no visual is needed. "
         "Leave `options`, `match_pairs`, and `is_true` empty."
     ),
     QuestionType.VISUAL_WORKSHEET: (
@@ -77,7 +85,7 @@ SYLLABUS CONTEXT (retrieved passages):
 RELATED TOPICS (from the course knowledge graph):
 {related_topics}
 
-{co_section}
+{co_section}{used_visuals_section}
 Write {num_questions} {question_type} question(s) at Bloom's level "{bloom_level}" worth {marks} marks \
 each, covering: {topics}.
 
@@ -89,6 +97,9 @@ FORMAT RULES for {question_type}: {type_instruction}
 - Tag each question with the topic names it covers (topic_names): include the topic(s) above and any \
 related topics from the list above that the question actually draws on.
 - If Course Outcomes were given, tag applicable co_codes; otherwise leave co_codes empty.
+- `text` and `correct_answer` are rendered through a LaTeX engine that treats a bare `$` as the start \
+of a math expression. If a question needs a literal currency amount (e.g. a shopping/profit-and-loss \
+word problem), write it as `\\$50`, never a bare `$50` — otherwise the amount breaks rendering.
 """
 
 
@@ -182,6 +193,51 @@ def _co_section(course_outcomes: list[CourseOutcome] | None) -> str:
     return f"COURSE OUTCOMES (tag co_codes from this list only):\n{listed}\n"
 
 
+def used_visual_subjects(subject_id: str, bank: QuestionBank, limit: int = 40) -> list[str]:
+    """Picture subjects (e.g. "frog") already used in this subject's existing
+    visual_worksheet questions, most-recent first, deduped case-insensitively
+    and capped. Fed back into the generation prompt so a new worksheet avoids
+    reusing the same pictures.
+
+    Ordinary duplicate detection (duplicate_detection.py) can't do this job:
+    it compares question `text`, which for this type is just a short
+    instruction line ("Circle the sense organs") that's near-identical
+    across unrelated worksheets and says nothing about which pictures were
+    actually used - which is why VISUAL_WORKSHEET skips it entirely
+    (see _SKIP_SCORING_TYPES in app/api/questions.py)."""
+    existing = [
+        q
+        for q in bank.list_by_subject(subject_id)
+        if q.question_type == QuestionType.VISUAL_WORKSHEET and q.grid_layout is not None
+    ]
+    existing.sort(key=lambda q: q.created_at, reverse=True)
+
+    seen: list[str] = []
+    seen_lower: set[str] = set()
+    for q in existing:
+        for item in q.grid_layout.items:
+            subject = item.visual.subject.strip()
+            key = subject.lower()
+            if subject and key not in seen_lower:
+                seen_lower.add(key)
+                seen.append(subject)
+                if len(seen) >= limit:
+                    return seen
+    return seen
+
+
+def _used_visuals_section(question_type: QuestionType, subject_id: str, bank: QuestionBank | None) -> str:
+    if question_type != QuestionType.VISUAL_WORKSHEET or bank is None:
+        return ""
+    used = used_visual_subjects(subject_id, bank)
+    if not used:
+        return ""
+    return (
+        "PICTURES ALREADY USED in this subject's worksheets - do NOT reuse these exact subjects, "
+        f"pick different objects/concepts instead: {', '.join(used)}\n"
+    )
+
+
 @retry(
     retry=retry_if_exception_type((errors.ServerError, errors.APIError, httpx.TransportError)),
     stop=stop_after_attempt(4),
@@ -198,10 +254,17 @@ def generate_section_questions(
     question_type: QuestionType = QuestionType.SHORT_ANSWER,
     difficulty: Difficulty = "medium",
     course_outcomes: list[CourseOutcome] | None = None,
+    bank: QuestionBank | None = None,
 ) -> list[Question]:
     """Generate exam questions covering one or more topics, grounded in retrieved
     syllabus context and augmented with the knowledge graph's prerequisite/CO
-    relationships. Used by the section-based Question Paper Builder."""
+    relationships. Used by the section-based Question Paper Builder.
+
+    `bank`, when given, lets visual_worksheet generations see which picture
+    subjects this subject has already used (see _used_visuals_section) so
+    repeat requests don't keep drawing the same pictures. Optional because
+    not every caller needs/has a bank handle; omitting it just means no
+    picture-novelty steering for that call."""
     settings = get_settings()
     client = get_genai_client()
 
@@ -211,6 +274,7 @@ def generate_section_questions(
         context=_context_text(topics, subject_id),
         related_topics=_related_topics_text(topics, graph_store),
         co_section=_co_section(course_outcomes),
+        used_visuals_section=_used_visuals_section(question_type, subject_id, bank),
         num_questions=num_questions,
         question_type=question_type.value,
         bloom_level=bloom_level.name,
@@ -292,6 +356,7 @@ def generate_questions(
     question_type: QuestionType = QuestionType.SHORT_ANSWER,
     difficulty: Difficulty = "medium",
     course_outcomes: list[CourseOutcome] | None = None,
+    bank: QuestionBank | None = None,
 ) -> list[Question]:
     """Single-topic convenience wrapper around generate_section_questions."""
     return generate_section_questions(
@@ -304,4 +369,5 @@ def generate_questions(
         question_type=question_type,
         difficulty=difficulty,
         course_outcomes=course_outcomes,
+        bank=bank,
     )

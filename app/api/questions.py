@@ -1,5 +1,3 @@
-from typing import Literal
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -9,6 +7,7 @@ from app.core.question_bank import get_question_bank
 from app.schemas.bloom import BloomLevel
 from app.schemas.course_outcome import CourseOutcome
 from app.schemas.difficulty import DifficultyScore
+from app.schemas.draft import Difficulty
 from app.schemas.duplicate import DuplicateMatch
 from app.schemas.question import Question, QuestionType
 from app.schemas.teacher import Teacher
@@ -26,6 +25,7 @@ class GenerateQuestionsRequest(BaseModel):
     bloom_level: BloomLevel = BloomLevel.UNDERSTAND
     marks: int = 5
     question_type: QuestionType = QuestionType.SHORT_ANSWER
+    difficulty: Difficulty = "medium"
     course_outcomes: list[CourseOutcome] | None = None
     check_duplicates: bool = True
     save_to_bank: bool = False
@@ -77,7 +77,9 @@ def generate(request: GenerateQuestionsRequest, teacher: Teacher = Depends(get_c
         bloom_level=request.bloom_level,
         marks=request.marks,
         question_type=request.question_type,
+        difficulty=request.difficulty,
         course_outcomes=request.course_outcomes,
+        bank=bank,
     )
 
     results = []
@@ -95,7 +97,7 @@ class GenerateSectionRequest(BaseModel):
     topic_ids: list[str]
     question_type: QuestionType
     num_questions: int = 3
-    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    difficulty: Difficulty = "medium"
     marks: int = 5
     bloom_level: BloomLevel = BloomLevel.UNDERSTAND
     course_outcomes: list[CourseOutcome] | None = None
@@ -105,8 +107,8 @@ class GenerateSectionRequest(BaseModel):
 
 @router.post("/generate-section", response_model=GenerateQuestionsResponse)
 def generate_section(request: GenerateSectionRequest, teacher: Teacher = Depends(get_current_teacher)) -> GenerateQuestionsResponse:
-    """Generate questions for one Question Paper Builder section: one format,
-    one difficulty, one or more topics. Primary entry point for the Builder."""
+    """Generate questions for one 'Random' Question Paper Builder section: one
+    format, one difficulty, drawn from a pool of one or more topics."""
     require_subject(request.subject_id, teacher)
     graph_store = get_graph_store(request.subject_id)
     bank = get_question_bank()
@@ -124,6 +126,7 @@ def generate_section(request: GenerateSectionRequest, teacher: Teacher = Depends
         question_type=request.question_type,
         difficulty=request.difficulty,
         course_outcomes=request.course_outcomes,
+        bank=bank,
     )
 
     results = []
@@ -176,3 +179,28 @@ def delete_question(question_id: str, teacher: Teacher = Depends(get_current_tea
     require_subject(question.subject_id, teacher)
     bank.remove(question_id)
     return {"deleted": question_id}
+
+
+class BulkDeleteQuestionsRequest(BaseModel):
+    question_ids: list[str]
+
+
+@router.post("/bulk-delete")
+def bulk_delete_questions(
+    request: BulkDeleteQuestionsRequest, teacher: Teacher = Depends(get_current_teacher)
+) -> dict:
+    """Delete multiple questions at once (Question Bank mass-delete). Silently
+    skips ids that don't exist or aren't owned by the caller's subjects."""
+    bank = get_question_bank()
+    deleted: list[str] = []
+    for question_id in request.question_ids:
+        question = bank.get(question_id)
+        if question is None:
+            continue
+        try:
+            require_subject(question.subject_id, teacher)
+        except HTTPException:
+            continue
+        if bank.remove(question_id):
+            deleted.append(question_id)
+    return {"deleted": deleted}

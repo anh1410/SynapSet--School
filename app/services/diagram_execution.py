@@ -13,7 +13,51 @@ import ast
 import multiprocessing
 import re
 
-ALLOWED_IMPORTS = {"matplotlib", "matplotlib.pyplot", "numpy", "math"}
+ALLOWED_IMPORTS = {
+    "matplotlib",
+    "matplotlib.pyplot",
+    "matplotlib.patches",
+    "matplotlib.lines",
+    "matplotlib.path",
+    "mpl_toolkits.mplot3d",
+    "numpy",
+    "math",
+}
+
+# Safe, side-effect-free builtins a normal plotting snippet needs (loop/aggregate
+# helpers, type constructors, numeric functions). None of these touch the
+# filesystem, network, or process - eval/exec/compile/open/__import__ stay
+# excluded below regardless of what's added here.
+_SAFE_BUILTIN_NAMES = (
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "complex",
+    "dict",
+    "divmod",
+    "enumerate",
+    "filter",
+    "float",
+    "frozenset",
+    "int",
+    "isinstance",
+    "len",
+    "list",
+    "map",
+    "max",
+    "min",
+    "pow",
+    "range",
+    "reversed",
+    "round",
+    "set",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "zip",
+)
 _DANGEROUS_TOKENS = re.compile(r"\b(os|sys|subprocess|socket|shutil|pathlib|importlib)\b")
 
 
@@ -59,16 +103,34 @@ def _render_worker(source: str, conn) -> None:
     current figure — the prompt tells Gemini never to call savefig/show
     itself, which removes file-write access as an attack surface entirely."""
     try:
+        import builtins
         import io
         import math
 
         import matplotlib
 
         matplotlib.use("Agg")
+        import matplotlib.lines
+        import matplotlib.patches
+        import matplotlib.path
         import matplotlib.pyplot as plt
+        import mpl_toolkits.mplot3d
         import numpy as np
 
         plt.figure(figsize=(5, 4))
+
+        # `matplotlib.patches`/etc are attached as attributes of the `matplotlib`
+        # package the moment they're imported above, same as `.pyplot` already was.
+        _IMPORT_TARGETS = {
+            "numpy": np,
+            "math": math,
+            "matplotlib": matplotlib,
+            "matplotlib.pyplot": matplotlib,
+            "matplotlib.patches": matplotlib,
+            "matplotlib.lines": matplotlib,
+            "matplotlib.path": matplotlib,
+            "mpl_toolkits.mplot3d": mpl_toolkits.mplot3d,
+        }
 
         def _safe_import(name, *args, **kwargs):
             # check_diagram_code_safety already restricts `import` statements in the
@@ -79,21 +141,19 @@ def _render_worker(source: str, conn) -> None:
             #
             # `import matplotlib.pyplot as plt` compiles to IMPORT_NAME("matplotlib.pyplot")
             # followed by an IMPORT_FROM that does getattr(<returned>, "pyplot") itself -
-            # so this must return the top-level `matplotlib` package (with `.pyplot`
-            # already attached as an attribute, since it's imported above), not the
-            # pyplot module directly, or that getattr raises "cannot import name
-            # 'pyplot' from 'matplotlib.pyplot'".
-            if name in ("numpy", "math", "matplotlib", "matplotlib.pyplot"):
-                return {"numpy": np, "math": math, "matplotlib": matplotlib, "matplotlib.pyplot": matplotlib}[name]
+            # so most of these must return the top-level `matplotlib` package (with
+            # `.pyplot`/`.patches`/etc already attached as attributes, since they're
+            # imported above), not the submodule directly, or that getattr raises
+            # "cannot import name 'pyplot' from 'matplotlib.pyplot'".
+            if name in _IMPORT_TARGETS:
+                return _IMPORT_TARGETS[name]
             raise ImportError(f"import not allowed: {name}")
 
         safe_globals = {
             "plt": plt,
             "np": np,
             "__builtins__": {
-                "range": range,
-                "len": len,
-                "enumerate": enumerate,
+                **{name: getattr(builtins, name) for name in _SAFE_BUILTIN_NAMES},
                 "__import__": _safe_import,
             },
         }

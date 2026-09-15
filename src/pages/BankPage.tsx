@@ -12,6 +12,7 @@ import {
   BLOOM_LABELS,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_ORDER,
+  bulkDeleteQuestions,
   createBlueprint,
   deleteQuestion,
   difficultyBucket,
@@ -81,6 +82,15 @@ export function BankPage({
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
+  const allFilteredSelected = filtered.length > 0 && filtered.every((q) => selected.includes(q.id));
+
+  const toggleSelectAll = () =>
+    setSelected((s) => {
+      if (allFilteredSelected) return s.filter((id) => !filtered.some((q) => q.id === id));
+      const filteredIds = filtered.map((q) => q.id);
+      return [...new Set([...s, ...filteredIds])];
+    });
+
   const handleDelete = async (id: string) => {
     await deleteQuestion(id);
     setQuestions((qs) => qs.filter((q) => q.id !== id));
@@ -88,9 +98,9 @@ export function BankPage({
   };
 
   const handleBulkDelete = async () => {
-    await Promise.all(selected.map((id) => deleteQuestion(id)));
-    setQuestions((qs) => qs.filter((q) => !selected.includes(q.id)));
-    setSelected([]);
+    const { deleted } = await bulkDeleteQuestions(selected);
+    setQuestions((qs) => qs.filter((q) => !deleted.includes(q.id)));
+    setSelected((s) => s.filter((id) => !deleted.includes(id)));
   };
 
   const handleCreatePaper = async () => {
@@ -197,7 +207,9 @@ export function BankPage({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-y border-border bg-secondary/40 text-left text-xs text-muted-foreground">
-                    <th className="w-10 px-6 py-2.5"></th>
+                    <th className="w-10 px-6 py-2.5">
+                      <Checkbox checked={allFilteredSelected} onCheckedChange={toggleSelectAll} />
+                    </th>
                     <th className="px-2 py-2.5 font-medium">Question</th>
                     <th className="px-4 py-2.5 font-medium">Topic</th>
                     <th className="px-4 py-2.5 font-medium">Difficulty</th>

@@ -229,12 +229,22 @@ export interface PaperBlueprint {
 
 // ---------- Builder drafts ----------
 
+export type SectionMode = "specific" | "random";
+
+export interface DraftQuestionSpec {
+  id: string;
+  topic_id: string;
+  difficulty: Difficulty;
+}
+
 export interface DraftSection {
   id: string;
   question_format: QuestionType;
-  count: number;
-  topic_ids: string[];
-  difficulty: Difficulty;
+  mode: SectionMode;
+  questions: DraftQuestionSpec[]; // mode === "specific"
+  topic_ids: string[]; // mode === "random"
+  difficulty: Difficulty; // mode === "random"
+  count: number; // mode === "random"
   marks_per_question: number;
   generated_question_ids: string[];
 }
@@ -265,8 +275,10 @@ export function deleteDraft(subjectId: string) {
 
 export interface TemplateSection {
   question_format: QuestionType;
-  count: number;
-  difficulty: Difficulty;
+  mode: SectionMode;
+  difficulties: Difficulty[]; // mode === "specific": one entry per planned question
+  difficulty: Difficulty; // mode === "random"
+  count: number; // mode === "random"
   marks_per_question: number;
 }
 
@@ -482,9 +494,10 @@ export interface GenerateQuestionsParams {
   subject_id: string;
   topic: string;
   num_questions: number;
-  bloom_level: BloomLevel;
+  bloom_level?: BloomLevel;
   marks: number;
   question_type: QuestionType;
+  difficulty?: Difficulty;
   check_duplicates?: boolean;
   save_to_bank?: boolean;
 }
@@ -525,6 +538,13 @@ export function saveQuestion(question: Question) {
 
 export function deleteQuestion(id: string) {
   return apiFetch<{ deleted: string }>(`/questions/${id}`, { method: "DELETE" });
+}
+
+export function bulkDeleteQuestions(ids: string[]) {
+  return apiFetch<{ deleted: string[] }>("/questions/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ question_ids: ids }),
+  });
 }
 
 export function checkDuplicates(question: Question, threshold = 0.75) {

@@ -10,7 +10,7 @@ export function LatexText({ text, className }: { text: string; className?: strin
     <span className={className}>
       <ReactMarkdown
         remarkPlugins={[remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
         components={{
           p: ({ children }) => <>{children}</>,
         }}
