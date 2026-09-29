@@ -1,5 +1,6 @@
 import pickle
 import re
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,8 +10,21 @@ from app.core.config import get_settings
 
 
 def normalize_topic_name(name: str) -> str:
-    """Collapse a topic name to a stable node id (lowercase, single-spaced, alnum)."""
-    return re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+    """Collapse a topic name to a stable node id: lowercase, single-underscore-
+    separated, keeping letters/numbers/combining-marks from ANY script.
+
+    A plain [a-z0-9] allowlist (the previous implementation) strips every
+    non-Latin character, so a pure Hindi/Kannada topic name collapses to an
+    empty string - and merge_into_graph (entity_extraction.py) silently
+    drops nodes with an empty id, so those topics never made it into the
+    graph at all. Keeping Unicode category M (combining marks) as well as L
+    (letters) matters for Devanagari/Kannada specifically: matras and virama
+    are separate combining codepoints from the base consonant, and dropping
+    them (keeping only \\w, which excludes marks) fragments every word at
+    each matra instead of just at real word boundaries."""
+    lowered = name.strip().lower()
+    kept = ["_" if unicodedata.category(ch)[0] not in ("L", "N", "M") else ch for ch in lowered]
+    return re.sub(r"_+", "_", "".join(kept)).strip("_")
 
 
 class KnowledgeGraphStore:

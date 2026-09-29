@@ -66,6 +66,13 @@ export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   hard: "Hard",
 };
 
+// Languages Gemini is explicitly instructed to write question text/options/answers
+// in (see the LANGUAGE section of GENERATION_PROMPT). "English" is the default and
+// matches prior behavior exactly. Hindi/Kannada also get proper OpenType-shaped
+// rendering in exported PDFs (see indic_text.py) - other scripts aren't wired up yet.
+export const LANGUAGES = ["English", "Hindi", "Kannada"] as const;
+export type Language = (typeof LANGUAGES)[number];
+
 // Sensible default marks per format — always editable by the teacher, not locked.
 export const DEFAULT_MARKS: Record<QuestionType, number> = {
   fill_in_blank: 1,
@@ -247,6 +254,7 @@ export interface DraftSection {
   count: number; // mode === "random"
   marks_per_question: number;
   generated_question_ids: string[];
+  language: Language;
 }
 
 export interface BuilderDraft {
@@ -280,6 +288,7 @@ export interface TemplateSection {
   difficulty: Difficulty; // mode === "random"
   count: number; // mode === "random"
   marks_per_question: number;
+  language: Language;
 }
 
 export interface PaperTemplate {
@@ -498,6 +507,7 @@ export interface GenerateQuestionsParams {
   marks: number;
   question_type: QuestionType;
   difficulty?: Difficulty;
+  language?: Language;
   check_duplicates?: boolean;
   save_to_bank?: boolean;
 }
@@ -517,6 +527,7 @@ export interface GenerateSectionParams {
   difficulty: Difficulty;
   marks: number;
   bloom_level?: BloomLevel;
+  language?: Language;
   check_duplicates?: boolean;
   save_to_bank?: boolean;
 }

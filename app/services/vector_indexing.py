@@ -1,4 +1,4 @@
-from app.core.llm import embed_text
+from app.core.llm import embed_text, embed_texts
 from app.core.vector_store import get_collection
 from app.services.document_extraction import TextChunk
 
@@ -8,13 +8,15 @@ def _chunk_id(chunk: TextChunk) -> str:
 
 
 def index_chunks(chunks: list[TextChunk], subject_id: str) -> None:
-    """Embed each chunk and upsert it into the given subject's vector store."""
+    """Embed each chunk and upsert it into the given subject's vector store.
+    Batched (embed_texts) rather than one embed_text() call per chunk - see
+    embed_texts' docstring for why that burst pattern matters."""
     if not chunks:
         return
 
     collection = get_collection(subject_id)
     ids = [_chunk_id(c) for c in chunks]
-    embeddings = [embed_text(c.text) for c in chunks]
+    embeddings = embed_texts([c.text for c in chunks])
     documents = [c.text for c in chunks]
     metadatas = [
         {"source_document": c.source_document, "chunk_index": c.chunk_index} for c in chunks

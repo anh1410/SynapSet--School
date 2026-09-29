@@ -45,5 +45,19 @@ pyjwt==2.13.0
 matplotlib==3.11.1
 Pillow==12.3.0
 
+# Devanagari/Kannada text shaping for PDF export (reportlab has no OpenType
+# shaping engine - see app/services/indic_text.py)
+uharfbuzz==0.56.1
+freetype-py==2.5.1
+
+# OCR fallback for PDFs typeset with a legacy pre-Unicode Indic font (Nudi,
+# Kruti Dev, etc - common in Indian govt/textbook PDFs), whose text layer
+# extracts as garbled mojibake instead of real text (see
+# document_extraction.py's _is_garbled/_ocr_pdf). pypdfium2 renders pages
+# without needing poppler/system deps; easyocr ships its own models via pip,
+# no separate OCR engine binary (e.g. Tesseract) needs installing.
+pypdfium2==5.13.0
+easyocr==1.7.2
+
 # Testing
 pytest==9.1.1

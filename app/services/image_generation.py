@@ -1,55 +1,57 @@
-"""Generates the actual image bytes for a VisualPrompt.
+"""Generates the actual image bytes for a VisualPrompt, via Gemini's
+image-generation models over the same google-genai client/API key already
+used for question generation and embeddings.
 
-No Imagen/DALL-E API key exists yet, so `generate_image` currently renders
-a local placeholder card instead of calling a real image model. The
-signature (str -> PNG bytes) is the whole contract: swap the function body
-for a real API call once a key exists, and nothing upstream changes.
+Needs an API key with billing enabled: Gemini image models have no free
+tier at all (text generation works fine on free tier - only this call
+needs the paid tier). Until billing is on, this raises, which callers
+already treat as a normal per-item failure (see _resolve_grid_layout in
+question_generation.py - one bad/failed image just gets left with
+image_id=None rather than aborting the whole worksheet).
+
+Model choice: gemini-3.1-flash-lite-image, not the (cheaper-sounding but
+irrelevant) 2.5 generation - gemini-2.5-flash-image is deprecated and
+Google shuts it down 2026-10-02. The "lite" 3.1 variant is the cheapest
+current option; swap to gemini-3.1-flash-image if illustration quality
+needs to go up.
 """
 
-import hashlib
-import io
-import textwrap
+import httpx
+from google.genai import errors, types
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-_PALETTE = [
-    "#FFD166",  # yellow
-    "#06D6A0",  # green
-    "#118AB2",  # blue
-    "#EF476F",  # red
-    "#8338EC",  # purple
-    "#FB8500",  # orange
-]
+from app.core.llm import get_genai_client
+
+IMAGE_MODEL = "gemini-3.1-flash-lite-image"
 
 
-def _color_for(prompt: str) -> str:
-    """Deterministic (not random) so re-generating the same prompt string
-    always gets the same placeholder color — useful for debugging/tests."""
-    digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-    return _PALETTE[int(digest, 16) % len(_PALETTE)]
+class ImageGenerationError(Exception):
+    pass
 
 
+@retry(
+    retry=retry_if_exception_type((errors.ServerError, errors.APIError, httpx.TransportError)),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    reraise=True,
+)
 def generate_image(prompt: str) -> bytes:
-    """Swappable image-generation interface. Currently a local placeholder
-    renderer via Matplotlib (already a hard dependency for diagram
-    rendering, so no second image library is needed); swap the body for a
-    real Imagen/DALL-E call once an API key exists."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import FancyBboxPatch
-
-    fig, ax = plt.subplots(figsize=(3, 3))
-    ax.add_patch(
-        FancyBboxPatch(
-            (0.05, 0.05), 0.9, 0.9, boxstyle="round,pad=0.02,rounding_size=0.05",
-            linewidth=0, facecolor=_color_for(prompt), transform=ax.transAxes,
-        )
+    """Calls Gemini's image model with `prompt` and returns PNG (or
+    whatever mime type it responds with) bytes from the first image part
+    in the response. Raises ImageGenerationError if the response has no
+    image part at all (e.g. the model responded with only text)."""
+    client = get_genai_client()
+    response = client.models.generate_content(
+        model=IMAGE_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
     )
-    wrapped = textwrap.fill(prompt, width=20)
-    ax.text(0.5, 0.5, wrapped, ha="center", va="center", fontsize=11, color="white", transform=ax.transAxes)
-    ax.axis("off")
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
-    plt.close(fig)
-    return buf.getvalue()
+    candidates = response.candidates or []
+    for candidate in candidates:
+        parts = candidate.content.parts if candidate.content else []
+        for part in parts or []:
+            if part.inline_data is not None and part.inline_data.data:
+                return part.inline_data.data
+
+    raise ImageGenerationError(f"No image returned for prompt: {prompt!r}")

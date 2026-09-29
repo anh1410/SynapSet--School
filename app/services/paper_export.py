@@ -14,6 +14,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from app.core.image_store import image_path
 from app.schemas.paper_blueprint import BlueprintSection, PaperBlueprint
 from app.schemas.question import GridLayoutKind, Question, QuestionType, ResponseStyle
+from app.services.indic_text import detect_script, render_shaped_text_png
 
 SectionWithQuestions = tuple[BlueprintSection, list[Question]]
 
@@ -153,8 +154,8 @@ def export_paper_pdf(
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(output_path, pagesize=A4)
     story = [
-        Paragraph(subject_name, styles["Normal"]),
-        Paragraph(blueprint.name, styles["Title"]),
+        _rich_text_flowable(subject_name, styles),
+        _rich_text_flowable(blueprint.name, styles, "Title"),
         Paragraph(f"Teacher: {teacher_name}", styles["Normal"]),
     ]
     if blueprint.duration_minutes is not None:
@@ -167,7 +168,7 @@ def export_paper_pdf(
     for section, questions in sections:
         if not questions:
             continue
-        story.append(Paragraph(section.title, styles["Heading2"]))
+        story.append(_rich_text_flowable(section.title, styles, "Heading2"))
         for q in questions:
             q_num += 1
             story.extend(_pdf_question_flowables(q, q_num, styles, include_answers))
@@ -178,13 +179,30 @@ def export_paper_pdf(
     return output_path
 
 
+def _rich_text_flowable(text: str, styles, style_name: str = "Normal"):
+    """A Paragraph for Latin text; a shaped-and-rasterized image for
+    Devanagari/Kannada text. reportlab's Paragraph has no OpenType shaping
+    engine, so drawing those scripts as text directly produces wrong/
+    reordered glyphs (see indic_text.py) - only text actually containing
+    those scripts pays the rasterization cost, everything else (including
+    every English-subject paper) is unaffected."""
+    script = detect_script(text)
+    if script is None:
+        return Paragraph(text, styles[style_name])
+    png = render_shaped_text_png(text, script)
+    w, h = PILImage.open(io.BytesIO(png)).size
+    target_h = styles[style_name].fontSize * 1.3
+    scale = target_h / max(h, 1)
+    return RLImage(io.BytesIO(png), width=w * scale, height=h * scale)
+
+
 def _pdf_text_flowable(text: str, prefix: str, styles) -> list:
     """One question's text/prefix, with any $...$ math segments rasterized
     and interleaved via a borderless single-row Table — reportlab has no
     native way to mix an inline Image into a Paragraph's text flow."""
     full_text = f"{prefix}{text}"
     if not _has_latex(full_text):
-        return [Paragraph(full_text, styles["Normal"])]
+        return [_rich_text_flowable(full_text, styles)]
 
     cells = []
     for chunk, is_math in _split_latex_segments(full_text):
@@ -194,9 +212,9 @@ def _pdf_text_flowable(text: str, prefix: str, styles) -> list:
             scale = 14 / max(h, 1)  # normalize to ~body-text height
             cells.append(RLImage(io.BytesIO(png), width=w * scale, height=h * scale))
         elif chunk:
-            cells.append(Paragraph(chunk, styles["Normal"]))
+            cells.append(_rich_text_flowable(chunk, styles))
     if not cells:
-        return [Paragraph(full_text, styles["Normal"])]
+        return [_rich_text_flowable(full_text, styles)]
     table = Table([cells])
     table.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
     return [table]
@@ -209,13 +227,20 @@ def _pdf_question_flowables(q: Question, q_num: int, styles, include_answers: bo
     if q.question_type == QuestionType.MCQ and q.options:
         for j, option in enumerate(q.options):
             letter = chr(ord("a") + j)
-            flowables.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;({letter}) {option}", styles["Normal"]))
+            #   (real NBSP) rather than the &nbsp; markup entity: markup
+            # is only meaningful to Paragraph, and _rich_text_flowable may
+            # route this through the Devanagari/Kannada raster path instead,
+            # which draws literal characters, not HTML entities.
+            indent = " " * 4
+            flowables.append(_rich_text_flowable(f"{indent}({letter}) {option}", styles))
 
     if q.question_type == QuestionType.MATCH_FOLLOWING and q.match_pairs:
         column_a, column_b, _ = _match_columns(q)
         rows = [["Column A", "Column B"]]
         for i in range(max(len(column_a), len(column_b))):
-            rows.append([column_a[i] if i < len(column_a) else "", column_b[i] if i < len(column_b) else ""])
+            left = _rich_text_flowable(column_a[i], styles) if i < len(column_a) else ""
+            right = _rich_text_flowable(column_b[i], styles) if i < len(column_b) else ""
+            rows.append([left, right])
         table = Table(rows, colWidths=[2.6 * inch, 2.6 * inch])
         table.setStyle(
             TableStyle(
@@ -257,7 +282,7 @@ def _pdf_diagram_flowables(q: Question, styles) -> list:
             scale = min(1.0, max_w / w)
             flowables = [RLImage(str(path), width=w * scale, height=h * scale)]
             if diagram.caption:
-                flowables.append(Paragraph(diagram.caption, styles["Italic"]))
+                flowables.append(_rich_text_flowable(diagram.caption, styles, "Italic"))
             return flowables
     # render_error, or a missing file - fall back to showing the source
     note = f" ({diagram.render_error})" if diagram.render_error else ""
@@ -281,7 +306,7 @@ def _pdf_grid_table(q: Question, styles, include_answers: bool) -> Table:
             scale = side / max(w, h)
             cell_parts.append(RLImage(str(path), width=w * scale, height=h * scale))
         if item.label:
-            cell_parts.append(Paragraph(item.label, styles["Normal"]))
+            cell_parts.append(_rich_text_flowable(item.label, styles))
         marked_correct = include_answers and bool(item.is_correct)
         if layout.response_style == ResponseStyle.CIRCLE_CHOICE:
             cell_parts.append(_CircleMarker(filled=marked_correct))
@@ -317,9 +342,12 @@ def _pdf_answer_flowable(q: Question, styles) -> list:
     if q.question_type == QuestionType.VISUAL_WORKSHEET:
         return []  # answers are already marked inline in the grid table above
     prefix = "<b>Answer:</b> "
-    if not _has_latex(q.correct_answer or ""):
-        return [Paragraph(f"{prefix}{_render_answer(q)}", styles["Normal"])]
-    return [Paragraph(prefix, styles["Normal"]), *_pdf_text_flowable(q.correct_answer or "", "", styles)]
+    if _has_latex(q.correct_answer or ""):
+        return [Paragraph(prefix, styles["Normal"]), *_pdf_text_flowable(q.correct_answer or "", "", styles)]
+    answer = _render_answer(q)
+    if detect_script(answer) is not None:
+        return [Paragraph(prefix, styles["Normal"]), _rich_text_flowable(answer, styles)]
+    return [Paragraph(f"{prefix}{answer}", styles["Normal"])]
 
 
 def export_paper_docx(

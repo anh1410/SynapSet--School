@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from app.schemas.draft import Difficulty, SectionMode
+from app.schemas.draft import Difficulty, Language, SectionMode
 from app.schemas.question import QuestionType
 
 
@@ -13,6 +13,7 @@ class TemplateSection(BaseModel):
     difficulty: Difficulty = "medium"  # mode == "random"
     count: int = 3  # mode == "random"
     marks_per_question: int
+    language: Language = "English"
 
 
 class PaperTemplate(BaseModel):

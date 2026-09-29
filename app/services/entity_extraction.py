@@ -1,11 +1,10 @@
 import warnings
 
-import httpx
-from google.genai import errors, types
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from google.genai import types
+from tenacity import retry
 
 from app.core.graph_store import KnowledgeGraphStore, normalize_topic_name
-from app.core.llm import get_genai_client
+from app.core.llm import _RATE_LIMIT_RETRY, get_genai_client
 from app.core.config import get_settings
 from app.schemas.extraction import ExtractionResult
 from app.services.document_extraction import TextChunk
@@ -24,12 +23,7 @@ TEXT:
 {text}"""
 
 
-@retry(
-    retry=retry_if_exception_type((errors.ServerError, errors.APIError, httpx.TransportError)),
-    stop=stop_after_attempt(4),
-    wait=wait_exponential(multiplier=2, min=2, max=30),
-    reraise=True,
-)
+@retry(**_RATE_LIMIT_RETRY)
 def extract_from_chunk(chunk: TextChunk, course_outcomes: list[str] | None = None) -> ExtractionResult:
     """Run LLM-based entity/relation extraction on a single text chunk, retrying transient 5xx errors."""
     settings = get_settings()

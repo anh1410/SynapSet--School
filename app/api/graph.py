@@ -1,4 +1,5 @@
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from app.core.question_bank import get_question_bank
 from app.schemas.document import DocumentCategory, UploadedDocument
 from app.schemas.teacher import Teacher
 from app.services.document_cleanup import remove_document_from_graph
-from app.services.document_extraction import extract_and_chunk, extract_and_chunk_for_extraction
+from app.services.document_extraction import extract_and_chunk, extract_and_chunk_for_extraction, extract_text
 from app.services.entity_extraction import extract_from_chunk, merge_into_graph
 from app.services.topic_dedup import merge_duplicate_topics
 from app.services.vector_indexing import delete_document_chunks, index_chunks
@@ -57,13 +58,25 @@ async def ingest_document(
     try:
         co_list = [c.strip() for c in course_outcomes.split(",") if c.strip()] if course_outcomes else None
 
-        retrieval_chunks = extract_and_chunk(str(dest))
+        # Extracted once and reused for both chunking passes below - for a
+        # PDF whose text layer is garbled (legacy Indic font) this falls
+        # back to OCR, which is slow; extracting twice was doubling that
+        # cost for no reason (confirmed: ~17 extra minutes on a real file).
+        full_text = extract_text(str(dest))
+        retrieval_chunks = extract_and_chunk(str(dest), text=full_text)
         index_chunks(retrieval_chunks, subject_id)
 
-        extraction_chunks = extract_and_chunk_for_extraction(str(dest))
+        extraction_chunks = extract_and_chunk_for_extraction(str(dest), text=full_text)
         graph_store = get_graph_store(subject_id)
         nodes_before = set(graph_store.graph.nodes)
-        for chunk in extraction_chunks:
+        for i, chunk in enumerate(extraction_chunks):
+            if i > 0:
+                # Small pacing between chunks so a document with several
+                # extraction chunks doesn't fire them back-to-back into the
+                # same per-minute rate limit the retrieval embeddings just
+                # used - extract_from_chunk's own retry (see _RATE_LIMIT_RETRY
+                # in llm.py) is the fallback if a call still gets throttled.
+                time.sleep(2)
             result = extract_from_chunk(chunk, course_outcomes=co_list)
             merge_into_graph(result, graph_store, source_document=chunk.source_document)
 

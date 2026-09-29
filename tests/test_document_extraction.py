@@ -2,10 +2,53 @@ from pathlib import Path
 
 import pytest
 
-from app.services.document_extraction import chunk_text, extract_text, extract_text_from_pdf, extract_text_from_pptx
+from app.services.document_extraction import (
+    _is_garbled,
+    chunk_text,
+    extract_and_chunk,
+    extract_and_chunk_for_extraction,
+    extract_text,
+    extract_text_from_pdf,
+    extract_text_from_pptx,
+)
 
 SAMPLE_PPTX = Path("data/uploads/CC/unit1.pptx")
 SAMPLE_PDF = Path("data/uploads/CC/unit1QB.pdf")
+
+
+def test_extract_and_chunk_skips_extraction_when_text_given(monkeypatch):
+    def fail_if_called(path):
+        raise AssertionError("extract_text should not be called when text= is given")
+
+    monkeypatch.setattr("app.services.document_extraction.extract_text", fail_if_called)
+
+    chunks = extract_and_chunk("fake.pdf", text="hello world " * 50)
+    assert len(chunks) >= 1
+
+    chunks2 = extract_and_chunk_for_extraction("fake.pdf", text="hello world " * 50)
+    assert len(chunks2) >= 1
+
+
+def test_is_garbled_detects_legacy_font_mojibake():
+    # Real extracted text from a PDF typeset in the legacy Nudi Kannada font.
+    garbled = "PÀ£ÁðlPÀ ¸ÀPÁðgÀ ¹j PÀ£ÀßqÀ ¥ÀæxÀªÀÄ ¨sÁµÉ PÀ£ÀßqÀ ¥ÀoÀå¥ÀÄ¸ÀÛPÀ eÁÕ£À ¸ÀAWÀ"
+    assert _is_garbled(garbled) is True
+
+
+def test_is_garbled_false_for_real_english():
+    text = "Photosynthesis is the process by which green plants convert sunlight into chemical energy for growth."
+    assert _is_garbled(text) is False
+
+
+def test_is_garbled_false_for_real_kannada_unicode():
+    text = "ದ್ಯುತಿಸಂಶ್ಲೇಷಣೆ ಎಂದರೇನು? ಸಸ್ಯಗಳು ಸೂರ್ಯನ ಬೆಳಕನ್ನು ಬಳಸಿಕೊಂಡು ಆಹಾರ ತಯಾರಿಸುತ್ತವೆ."
+    assert _is_garbled(text) is False
+
+
+def test_is_garbled_false_for_too_little_text():
+    # Can't judge reliably on a handful of characters either way - default to "not garbled"
+    # rather than trigger OCR (slow, model download) on effectively-empty extraction.
+    assert _is_garbled("À Á ð") is False
 
 
 def test_chunk_text_basic():

@@ -7,6 +7,7 @@ from app.schemas.question import QuestionType
 
 Difficulty = Literal["easy", "medium", "hard"]
 SectionMode = Literal["specific", "random"]
+Language = Literal["English", "Hindi", "Kannada"]
 
 
 class DraftQuestionSpec(BaseModel):
@@ -24,6 +25,7 @@ class DraftSection(BaseModel):
     difficulty: Difficulty = "medium"  # mode == "random"
     count: int = 3  # mode == "random"
     marks_per_question: int
+    language: Language = "English"
     generated_question_ids: list[str] = Field(default_factory=list)
 
 

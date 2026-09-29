@@ -26,6 +26,7 @@ class GenerateQuestionsRequest(BaseModel):
     marks: int = 5
     question_type: QuestionType = QuestionType.SHORT_ANSWER
     difficulty: Difficulty = "medium"
+    language: str = "English"
     course_outcomes: list[CourseOutcome] | None = None
     check_duplicates: bool = True
     save_to_bank: bool = False
@@ -78,6 +79,7 @@ def generate(request: GenerateQuestionsRequest, teacher: Teacher = Depends(get_c
         marks=request.marks,
         question_type=request.question_type,
         difficulty=request.difficulty,
+        language=request.language,
         course_outcomes=request.course_outcomes,
         bank=bank,
     )
@@ -100,6 +102,7 @@ class GenerateSectionRequest(BaseModel):
     difficulty: Difficulty = "medium"
     marks: int = 5
     bloom_level: BloomLevel = BloomLevel.UNDERSTAND
+    language: str = "English"
     course_outcomes: list[CourseOutcome] | None = None
     check_duplicates: bool = True
     save_to_bank: bool = True
@@ -125,6 +128,7 @@ def generate_section(request: GenerateSectionRequest, teacher: Teacher = Depends
         marks=request.marks,
         question_type=request.question_type,
         difficulty=request.difficulty,
+        language=request.language,
         course_outcomes=request.course_outcomes,
         bank=bank,
     )

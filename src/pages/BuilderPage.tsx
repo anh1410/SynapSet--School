@@ -26,6 +26,7 @@ import {
   DEFAULT_MARKS,
   DIFFICULTY_LABELS,
   DIFFICULTY_LEVELS,
+  LANGUAGES,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_ORDER,
   createBlueprint,
@@ -45,6 +46,7 @@ import {
   type DraftSection,
   type GeneratedQuestionResult,
   type GraphNode,
+  type Language,
   type PaperTemplate,
   type QuestionType,
   type SectionMode,
@@ -91,6 +93,7 @@ function makeSection(topics: GraphNode[]): DraftSection {
     count: 3,
     marks_per_question: DEFAULT_MARKS.short_answer,
     generated_question_ids: [],
+    language: "English",
   };
 }
 
@@ -304,6 +307,7 @@ export function BuilderPage({
         count: ts.mode === "random" ? ts.count : 3,
         marks_per_question: ts.marks_per_question,
         generated_question_ids: [],
+        language: ts.language,
       }))
     );
     if (template.duration_minutes != null) setDuration(template.duration_minutes);
@@ -335,6 +339,7 @@ export function BuilderPage({
           difficulty: s.mode === "random" ? s.difficulty : "medium",
           count: s.mode === "random" ? s.count : s.questions.length,
           marks_per_question: s.marks_per_question,
+          language: s.language,
         })),
       });
       setTemplates((prev) => [template, ...prev]);
@@ -360,6 +365,7 @@ export function BuilderPage({
         question_type: section.question_format,
         difficulty: spec.difficulty,
         marks: section.marks_per_question,
+        language: section.language,
         check_duplicates: true,
         save_to_bank: true,
       });
@@ -394,6 +400,7 @@ export function BuilderPage({
         num_questions: section.count,
         difficulty: section.difficulty,
         marks: section.marks_per_question,
+        language: section.language,
         check_duplicates: true,
         save_to_bank: true,
       });
@@ -675,6 +682,20 @@ export function BuilderPage({
                     value={section.marks_per_question}
                     onChange={(e) => updateSection(section.id, "marks_per_question", Math.max(1, Number(e.target.value)))}
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground">Language</label>
+                  <Select
+                    value={section.language}
+                    onChange={(e) => updateSection(section.id, "language", e.target.value as Language)}
+                  >
+                    {LANGUAGES.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </Select>
                 </div>
 
                 <p className="text-[11px] text-muted-foreground">

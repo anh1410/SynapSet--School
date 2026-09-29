@@ -89,6 +89,10 @@ RELATED TOPICS (from the course knowledge graph):
 Write {num_questions} {question_type} question(s) at Bloom's level "{bloom_level}" worth {marks} marks \
 each, covering: {topics}.
 
+LANGUAGE: Write all question text, options, and answers in {language}. Keep any numerals, chemical/math \
+notation, and proper nouns that don't translate exactly as they naturally would in {language} text. \
+Tag topic_names using the exact topic names given above (TOPIC(S) / RELATED TOPICS) — don't translate those.
+
 DIFFICULTY TARGET ({difficulty}): {difficulty_instruction}
 
 FORMAT RULES for {question_type}: {type_instruction}
@@ -253,6 +257,7 @@ def generate_section_questions(
     marks: int = 5,
     question_type: QuestionType = QuestionType.SHORT_ANSWER,
     difficulty: Difficulty = "medium",
+    language: str = "English",
     course_outcomes: list[CourseOutcome] | None = None,
     bank: QuestionBank | None = None,
 ) -> list[Question]:
@@ -279,6 +284,7 @@ def generate_section_questions(
         question_type=question_type.value,
         bloom_level=bloom_level.name,
         marks=marks,
+        language=language,
         difficulty=difficulty,
         difficulty_instruction=DIFFICULTY_INSTRUCTIONS[difficulty],
         type_instruction=QUESTION_TYPE_INSTRUCTIONS[question_type],
@@ -355,6 +361,7 @@ def generate_questions(
     marks: int = 5,
     question_type: QuestionType = QuestionType.SHORT_ANSWER,
     difficulty: Difficulty = "medium",
+    language: str = "English",
     course_outcomes: list[CourseOutcome] | None = None,
     bank: QuestionBank | None = None,
 ) -> list[Question]:
@@ -368,6 +375,7 @@ def generate_questions(
         marks=marks,
         question_type=question_type,
         difficulty=difficulty,
+        language=language,
         course_outcomes=course_outcomes,
         bank=bank,
     )
