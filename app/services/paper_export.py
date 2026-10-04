@@ -258,7 +258,7 @@ def _pdf_question_flowables(q: Question, q_num: int, styles, include_answers: bo
         flowables.append(table)
         flowables.append(Spacer(1, 0.1 * inch))
 
-    if q.question_type == QuestionType.STEM_DIAGRAM and q.diagram is not None:
+    if q.diagram is not None:
         flowables.extend(_pdf_diagram_flowables(q, styles))
 
     if q.question_type == QuestionType.VISUAL_WORKSHEET and q.grid_layout is not None:
@@ -415,7 +415,7 @@ def _docx_question(doc: Document, q: Question, q_num: int, include_answers: bool
             table.rows[i + 1].cells[0].text = column_a[i] if i < len(column_a) else ""
             table.rows[i + 1].cells[1].text = column_b[i] if i < len(column_b) else ""
 
-    if q.question_type == QuestionType.STEM_DIAGRAM and q.diagram is not None:
+    if q.diagram is not None:
         _docx_diagram(doc, q.diagram)
 
     if q.question_type == QuestionType.VISUAL_WORKSHEET and q.grid_layout is not None:

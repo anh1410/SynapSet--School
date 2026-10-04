@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.api.deps import get_current_teacher, require_subject
+from app.api.deps import get_current_teacher, require_admin, require_subject
 from app.core.graph_store import get_graph_store
 from app.core.question_bank import get_question_bank
 from app.schemas.bloom import BloomLevel
@@ -15,7 +15,7 @@ from app.services.difficulty_scoring import score_difficulty
 from app.services.duplicate_detection import find_duplicates
 from app.services.question_generation import generate_questions, generate_section_questions
 
-router = APIRouter(prefix="/api/v1/questions", tags=["questions"], dependencies=[Depends(get_current_teacher)])
+router = APIRouter(prefix="/api/v1/questions", tags=["questions"], dependencies=[Depends(require_admin)])
 
 
 class GenerateQuestionsRequest(BaseModel):

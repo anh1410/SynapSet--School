@@ -26,6 +26,7 @@ class MatchPair(BaseModel):
 class DiagramKind(str, Enum):
     MATPLOTLIB = "matplotlib"
     TIKZ = "tikz"
+    IMAGE = "image"  # a picture a teacher uploaded; never produced by generation
 
 
 class DiagramSpec(BaseModel):
@@ -104,4 +105,5 @@ class Question(BaseModel):
     is_duplicate_of: str | None = None  # id of the original question, if flagged
 
     source_document: str | None = None
+    author_id: str | None = None  # the account that submitted it (None for AI-generated questions)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.api.deps import get_current_teacher, require_subject
+from app.api.deps import get_current_teacher, require_admin, require_subject
 from app.core.config import get_settings
+from app.core.credit_store import get_credit_store
 from app.core.paper_store import get_paper_store
 from app.core.question_bank import get_question_bank
 from app.core.subject_store import get_subject_store
@@ -18,7 +19,7 @@ from app.schemas.teacher import Teacher
 from app.services.paper_export import export_paper_docx, export_paper_pdf
 from app.services.paper_optimization import optimize_paper
 
-router = APIRouter(prefix="/api/v1/paper", tags=["paper"], dependencies=[Depends(get_current_teacher)])
+router = APIRouter(prefix="/api/v1/paper", tags=["paper"], dependencies=[Depends(require_admin)])
 
 
 def _require_owned_blueprint(blueprint_id: str, teacher: Teacher) -> PaperBlueprint:
@@ -26,6 +27,16 @@ def _require_owned_blueprint(blueprint_id: str, teacher: Teacher) -> PaperBluepr
     if blueprint is None or blueprint.teacher_id != teacher.id:
         raise HTTPException(status_code=404, detail="Blueprint not found")
     return blueprint
+
+
+def _sync_credits(blueprint: PaperBlueprint) -> None:
+    """Teachers earn a credit for each of their questions in a paper once it is exported.
+    A paper that is (back to) a draft earns nobody anything."""
+    questions: list[Question] = []
+    if blueprint.status == "exported":
+        bank = get_question_bank()
+        questions = [q for qid in blueprint.question_ids if (q := bank.get(qid)) is not None]
+    get_credit_store().sync_paper(blueprint.id, blueprint.subject_id, blueprint.name, questions)
 
 
 class OptimizePaperRequest(BaseModel):
@@ -184,6 +195,7 @@ def update_blueprint(blueprint_id: str, request: UpdateBlueprintRequest, teacher
         ]
     updated = blueprint.model_copy(update=update_data)
     store.add(updated)
+    _sync_credits(updated)
     return updated
 
 
@@ -213,5 +225,6 @@ def export_blueprint(
 
     blueprint.status = "exported"
     store.add(blueprint)
+    _sync_credits(blueprint)
 
     return FileResponse(path, media_type=_MEDIA_TYPES[format], filename=path.name)

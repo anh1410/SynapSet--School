@@ -22,6 +22,13 @@ const titles: Record<Page, { title: string; subtitle: string }> = {
   builder: { title: "Question Paper Builder", subtitle: "Configure sections, generate questions, and assemble your paper" },
   templates: { title: "Templates", subtitle: "Manage reusable section patterns for the Question Paper Builder" },
   review: { title: "Review & Export", subtitle: "Finalize and export the exam paper" },
+  subjects: { title: "Subjects", subtitle: "Create the school's subjects by grade and manage them" },
+  teachers: { title: "Teachers", subtitle: "Create teacher accounts and choose which subjects each one gets" },
+  submissions: { title: "Teacher Submissions", subtitle: "Review questions your teachers have sent in" },
+  mySubjects: { title: "My Subjects", subtitle: "The subjects your admin has assigned to you" },
+  mySubmissions: { title: "My Questions", subtitle: "Track what you've submitted and what your admin decided" },
+  myCredits: { title: "My Credits", subtitle: "Your questions that were used in exam papers" },
+  submitQuestion: { title: "Submit a Question", subtitle: "Propose a question for one of your subjects" },
 };
 
 export function Topbar({
@@ -36,7 +43,7 @@ export function Topbar({
   onSelectQuestion: (searchText: string) => void;
 }) {
   const { title, subtitle } = titles[page];
-  const { teacher, logout, activeSubjectId } = useAuth();
+  const { teacher, isAdmin, logout, activeSubjectId } = useAuth();
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -78,6 +85,7 @@ export function Topbar({
         <p className="hidden truncate text-xs text-muted-foreground sm:block">{subtitle}</p>
       </div>
 
+      {isAdmin && (
       <div className="relative hidden w-64 md:block">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -155,8 +163,9 @@ export function Topbar({
           </div>
         )}
       </div>
+      )}
 
-      <SubjectSwitcher />
+      {isAdmin && <SubjectSwitcher onManage={() => onNavigate("subjects")} />}
 
       <button className="relative rounded-md p-1.5 text-muted-foreground transition-colors duration-200 hover:bg-secondary hover:text-foreground">
         <Bell className="h-4.5 w-4.5" />
@@ -167,7 +176,7 @@ export function Topbar({
         <Avatar initials={teacher ? initialsFor(teacher.name) : "?"} />
         <div className="text-xs">
           <p className="font-medium text-foreground">{teacher?.name ?? "Unknown"}</p>
-          <p className="text-muted-foreground">Faculty</p>
+          <p className="text-muted-foreground">{isAdmin ? "Admin" : "Teacher"}</p>
         </div>
         <button
           onClick={logout}

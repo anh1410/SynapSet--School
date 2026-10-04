@@ -10,15 +10,66 @@ CREATE TABLE IF NOT EXISTS teachers (
     email TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'teacher',
+    active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
 
+-- Subjects are school-wide and managed by admins; teacher_id records which
+-- admin created it, it does NOT grant access (teacher_subjects does).
 CREATE TABLE IF NOT EXISTS subjects (
     id TEXT PRIMARY KEY,
     teacher_id TEXT NOT NULL,
     name TEXT NOT NULL,
+    grade TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS teacher_subjects (
+    teacher_id TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    assigned_at TEXT NOT NULL,
+    PRIMARY KEY (teacher_id, subject_id)
+);
+
+-- Questions teachers propose for a subject. The question body is JSON; when
+-- accepted it is copied into `questions` under the same id.
+CREATE TABLE IF NOT EXISTS submissions (
+    id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL,
+    teacher_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    question TEXT NOT NULL,
+    duplicates TEXT NOT NULL,
+    history TEXT NOT NULL,
+    admin_comment TEXT,
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions (status);
+CREATE INDEX IF NOT EXISTS idx_submissions_subject ON submissions (subject_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_teacher ON submissions (teacher_id);
+
+-- One credit per teacher-authored question per exported paper. The question text and
+-- exam name are snapshots, so a credit still reads correctly if the bank question or
+-- the paper is renamed or removed later.
+CREATE TABLE IF NOT EXISTS credits (
+    id TEXT PRIMARY KEY,
+    teacher_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    blueprint_id TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    exam_name TEXT NOT NULL,
+    question_text TEXT NOT NULL,
+    question_type TEXT NOT NULL,
+    marks INTEGER NOT NULL,
+    earned_at TEXT NOT NULL,
+    UNIQUE (question_id, blueprint_id)
+);
+CREATE INDEX IF NOT EXISTS idx_credits_teacher ON credits (teacher_id);
 
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
@@ -53,6 +104,7 @@ CREATE TABLE IF NOT EXISTS questions (
     embedding_id TEXT,
     is_duplicate_of TEXT,
     source_document TEXT,
+    author_id TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -97,6 +149,10 @@ CREATE TABLE IF NOT EXISTS paper_templates (
 _MIGRATIONS = [
     "ALTER TABLE questions ADD COLUMN diagram TEXT",
     "ALTER TABLE questions ADD COLUMN grid_layout TEXT",
+    "ALTER TABLE teachers ADD COLUMN role TEXT NOT NULL DEFAULT 'teacher'",
+    "ALTER TABLE teachers ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE subjects ADD COLUMN grade TEXT",
+    "ALTER TABLE questions ADD COLUMN author_id TEXT",
 ]
 
 

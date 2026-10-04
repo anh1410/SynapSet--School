@@ -18,6 +18,7 @@ import {
   difficultyBucket,
   fetchGraph,
   fetchQuestions,
+  listTeachers,
   type DifficultyBucket,
   type GraphNode,
   type Question,
@@ -47,10 +48,18 @@ export function BankPage({
   const [difficultyFilter, setDifficultyFilter] = useState("all");
   const [selected, setSelected] = useState<string[]>([]);
   const [creatingPaper, setCreatingPaper] = useState(false);
+  const [authors, setAuthors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (initialSearch !== undefined) setSearch(initialSearch);
   }, [initialSearch]);
+
+  // who wrote the teacher-submitted questions, shown under the question text
+  useEffect(() => {
+    listTeachers()
+      .then((ts) => setAuthors(Object.fromEntries(ts.map((t) => [t.id, t.name]))))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!activeSubjectId) return;
@@ -241,6 +250,9 @@ export function BankPage({
                             </td>
                             <td className="max-w-md px-2 py-3">
                               <p className="line-clamp-2 text-foreground">{q.text}</p>
+                              {q.author_id && authors[q.author_id] && (
+                                <p className="mt-0.5 text-[11px] text-muted-foreground">By {authors[q.author_id]}</p>
+                              )}
                             </td>
                             <td className="px-4 py-3 text-muted-foreground">
                               {q.topic_ids.length > 0 ? q.topic_ids.map(topicName).join(", ") : "—"}

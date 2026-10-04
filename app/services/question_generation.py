@@ -156,6 +156,10 @@ def _resolve_diagram(diagram):
     generation request."""
     if diagram is None:
         return None
+    if diagram.kind == DiagramKind.IMAGE:
+        # "image" means a teacher-uploaded picture; a model can't author one, so
+        # if structured output ever picks it, drop it rather than mis-render.
+        return None
     try:
         if diagram.kind == DiagramKind.MATPLOTLIB:
             png = execute_matplotlib_diagram(diagram.source_code)

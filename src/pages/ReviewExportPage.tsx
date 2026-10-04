@@ -200,7 +200,7 @@ export function ReviewExportPage({
                                       <p className="text-sm leading-relaxed text-foreground">
                                         <LatexText text={q.text} />
                                       </p>
-                                      {q.question_type === "stem_diagram" && q.diagram && <DiagramImage diagram={q.diagram} />}
+                                      {q.diagram && <DiagramImage diagram={q.diagram} />}
                                       {q.question_type === "visual_worksheet" && q.grid_layout && (
                                         <VisualWorksheetGrid layout={q.grid_layout} showAnswers={variant === "answer_key"} />
                                       )}

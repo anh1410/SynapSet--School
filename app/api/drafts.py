@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_current_teacher, require_subject
+from app.api.deps import get_current_teacher, require_admin, require_subject
 from app.core.draft_store import get_draft_store
 from app.schemas.draft import BuilderDraft
 from app.schemas.teacher import Teacher
 
-router = APIRouter(prefix="/api/v1/drafts", tags=["drafts"], dependencies=[Depends(get_current_teacher)])
+router = APIRouter(prefix="/api/v1/drafts", tags=["drafts"], dependencies=[Depends(require_admin)])
 
 
 @router.get("", response_model=BuilderDraft | None)

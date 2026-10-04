@@ -1,7 +1,10 @@
+export type Role = "admin" | "teacher";
+
 export interface TeacherPublic {
   id: string;
   email: string;
   name: string;
+  role: Role;
   created_at: string;
 }
 

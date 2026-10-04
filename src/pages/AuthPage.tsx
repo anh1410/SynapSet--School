@@ -1,14 +1,23 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GraduationCap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useAuth } from "@/lib/AuthContext";
-import { ApiError } from "@/lib/api";
+import { ApiError, signupStatus } from "@/lib/api";
 
 export function AuthPage() {
   const { login, signup } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
+  // Public signup only exists to create the very first (admin) account; after
+  // that, admins create teacher accounts, so the tab is hidden.
+  const [signupOpen, setSignupOpen] = useState(false);
+
+  useEffect(() => {
+    signupStatus()
+      .then((s) => setSignupOpen(s.signup_open))
+      .catch(() => setSignupOpen(false));
+  }, []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -45,29 +54,35 @@ export function AuthPage() {
 
         <Card>
           <CardHeader>
-            <div className="flex rounded-lg bg-secondary p-1 text-xs font-medium">
-              <button
-                type="button"
-                onClick={() => setMode("login")}
-                className={`flex-1 rounded-md py-1.5 transition-colors ${
-                  mode === "login" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground"
-                }`}
-              >
-                Log in
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("signup")}
-                className={`flex-1 rounded-md py-1.5 transition-colors ${
-                  mode === "signup" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground"
-                }`}
-              >
-                Sign up
-              </button>
-            </div>
-            <CardTitle className="pt-2">{mode === "login" ? "Welcome back" : "Create your account"}</CardTitle>
+            {signupOpen && (
+              <div className="flex rounded-lg bg-secondary p-1 text-xs font-medium">
+                <button
+                  type="button"
+                  onClick={() => setMode("login")}
+                  className={`flex-1 rounded-md py-1.5 transition-colors ${
+                    mode === "login" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}
+                >
+                  Log in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("signup")}
+                  className={`flex-1 rounded-md py-1.5 transition-colors ${
+                    mode === "signup" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}
+                >
+                  Sign up
+                </button>
+              </div>
+            )}
+            <CardTitle className={signupOpen ? "pt-2" : undefined}>
+              {mode === "login" ? "Welcome back" : "Create the admin account"}
+            </CardTitle>
             <CardDescription>
-              {mode === "login" ? "Log in with your teacher account" : "Set up a new teacher account"}
+              {mode === "login"
+                ? "Log in with the account your school admin gave you"
+                : "You're the first one here, so this account will be the school admin"}
             </CardDescription>
           </CardHeader>
           <CardContent>

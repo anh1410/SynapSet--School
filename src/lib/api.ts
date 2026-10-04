@@ -93,7 +93,7 @@ export interface MatchPair {
   right: string;
 }
 
-export type DiagramKind = "matplotlib" | "tikz";
+export type DiagramKind = "matplotlib" | "tikz" | "image"; // "image" = a picture a teacher uploaded
 
 export interface DiagramSpec {
   kind: DiagramKind;
@@ -147,6 +147,7 @@ export interface Question {
   embedding_id: string | null;
   is_duplicate_of: string | null;
   source_document: string | null;
+  author_id?: string | null; // the teacher who submitted it, when it came from a submission
   created_at: string;
   diagram: DiagramSpec | null;
   grid_layout: GridLayout | null;
@@ -433,25 +434,94 @@ export function me() {
   return apiFetch<import("@/lib/session").TeacherPublic>("/auth/me");
 }
 
+/** Public signup only exists to create the very first account (the admin). */
+export function signupStatus() {
+  return apiFetch<{ signup_open: boolean }>("/auth/signup-status");
+}
+
 // ---------- Subjects ----------
+
+// Karnataka-style school: LKG, UKG, then classes 1-10. Must match GRADES in app/schemas/subject.py.
+export const GRADES = ["LKG", "UKG", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] as const;
+export type Grade = (typeof GRADES)[number];
+
+export const gradeLabel = (grade: string | null | undefined): string =>
+  !grade ? "" : grade === "LKG" || grade === "UKG" ? grade : `Grade ${grade}`;
 
 export interface Subject {
   id: string;
-  teacher_id: string;
+  teacher_id: string; // the admin who created it - not an access grant
   name: string;
+  grade: string | null; // null only for subjects created before grades existed
   created_at: string;
+}
+
+/** "Maths · Grade 5", or just the name for an old subject with no grade yet. */
+export const subjectLabel = (s: Pick<Subject, "name" | "grade">): string =>
+  s.grade ? `${s.name} · ${gradeLabel(s.grade)}` : s.name;
+
+/** Subjects grouped for display in school order: LKG, UKG, 1..10, then any with no grade yet. */
+export function groupSubjectsByGrade<T extends Pick<Subject, "grade">>(
+  subjects: T[]
+): { grade: string | null; subjects: T[] }[] {
+  const groups = GRADES.map((g) => ({ grade: g as string | null, subjects: subjects.filter((s) => s.grade === g) }));
+  groups.push({ grade: null, subjects: subjects.filter((s) => !s.grade || !(GRADES as readonly string[]).includes(s.grade)) });
+  return groups.filter((g) => g.subjects.length > 0);
 }
 
 export function listSubjects() {
   return apiFetch<Subject[]>("/subjects");
 }
 
-export function createSubject(name: string) {
-  return apiFetch<Subject>("/subjects", { method: "POST", body: JSON.stringify({ name }) });
+export function createSubject(name: string, grade: string) {
+  return apiFetch<Subject>("/subjects", { method: "POST", body: JSON.stringify({ name, grade }) });
+}
+
+export function updateSubject(id: string, data: { name?: string; grade?: string }) {
+  return apiFetch<Subject>(`/subjects/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
 
 export function deleteSubject(id: string) {
   return apiFetch<{ deleted: string }>(`/subjects/${id}`, { method: "DELETE" });
+}
+
+// ---------- Admin: teacher accounts & subject assignments ----------
+
+export interface AdminTeacher {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin" | "teacher";
+  active: boolean;
+  created_at: string;
+  subject_ids: string[];
+  credit_count: number; // questions of theirs used in exported papers
+}
+
+export function listTeachers() {
+  return apiFetch<AdminTeacher[]>("/admin/teachers");
+}
+
+export function createTeacher(data: { name: string; email: string; password: string; subject_ids: string[] }) {
+  return apiFetch<AdminTeacher>("/admin/teachers", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function updateTeacher(
+  id: string,
+  data: { name?: string; role?: "admin" | "teacher"; active?: boolean; password?: string }
+) {
+  return apiFetch<AdminTeacher>(`/admin/teachers/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export function deleteTeacher(id: string) {
+  return apiFetch<{ deleted: string }>(`/admin/teachers/${id}`, { method: "DELETE" });
+}
+
+export function setTeacherSubjects(id: string, subjectIds: string[]) {
+  return apiFetch<AdminTeacher>(`/admin/teachers/${id}/subjects`, {
+    method: "PUT",
+    body: JSON.stringify({ subject_ids: subjectIds }),
+  });
 }
 
 // ---------- Graph & documents ----------
@@ -632,6 +702,153 @@ export async function exportBlueprint(id: string, name: string, format: "pdf" | 
   });
   const suffix = variant === "answer_key" ? "_answer_key" : "";
   await downloadFromResponse(res, `${name}${suffix}.${format}`);
+}
+
+// ---------- Images (teacher uploads) ----------
+
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // keep in step with image_store.MAX_UPLOAD_BYTES
+
+export function uploadImage(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetch<{ image_id: string }>("/images", { method: "POST", body: form });
+}
+
+// ---------- Submissions ----------
+
+export type SubmissionStatus = "submitted" | "changes_requested" | "accepted" | "rejected";
+
+export const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
+  submitted: "Waiting for review",
+  changes_requested: "Changes requested",
+  accepted: "Accepted",
+  rejected: "Rejected",
+};
+
+/** What a teacher is allowed to send; mirrors SubmittedQuestion in app/schemas/submission.py. */
+export interface SubmittedQuestion {
+  text: string;
+  question_type: QuestionType;
+  marks: number;
+  difficulty: Difficulty;
+  topic_ids: string[];
+  options?: string[] | null;
+  correct_answer?: string | null;
+  match_pairs?: MatchPair[] | null;
+  is_true?: boolean | null;
+  diagram?: { image_id: string; caption?: string | null } | null;
+  grid_layout?: {
+    kind: GridLayoutKind;
+    response_style: ResponseStyle;
+    items: { image_id: string; label?: string | null; is_correct?: boolean | null }[];
+  } | null;
+}
+
+export interface SubmissionEvent {
+  at: string;
+  kind: "submitted" | "edited" | "resubmitted" | "changes_requested" | "accepted" | "rejected";
+  by: string;
+  by_name: string;
+  comment: string | null;
+}
+
+/** A near-identical question already in the bank or waiting in the inbox. Admins only. */
+export interface DuplicateHit {
+  question_id: string;
+  text: string;
+  similarity: number;
+  where: "bank" | "pending";
+}
+
+export interface Submission {
+  id: string;
+  subject_id: string;
+  subject_name: string;
+  subject_grade: string | null;
+  teacher_id: string;
+  teacher_name: string;
+  status: SubmissionStatus;
+  question: Question;
+  admin_comment: string | null;
+  reviewed_at: string | null;
+  revision: number;
+  history: SubmissionEvent[];
+  created_at: string;
+  updated_at: string;
+  duplicate_hits: DuplicateHit[];
+}
+
+export interface SubmissionSummary {
+  submitted: number;
+  changes_requested: number;
+  accepted: number;
+  rejected: number;
+}
+
+export interface SubmissionFilters {
+  subject_id?: string;
+  grade?: string;
+  teacher_id?: string;
+  status?: SubmissionStatus;
+  question_type?: QuestionType;
+  q?: string;
+}
+
+export function listSubmissions(filters: SubmissionFilters = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value);
+  const qs = params.toString();
+  return apiFetch<Submission[]>(`/submissions${qs ? `?${qs}` : ""}`);
+}
+
+export function submissionSummary() {
+  return apiFetch<SubmissionSummary>("/submissions/summary");
+}
+
+export function createSubmission(subjectId: string, question: SubmittedQuestion) {
+  return apiFetch<Submission>("/submissions", {
+    method: "POST",
+    body: JSON.stringify({ subject_id: subjectId, question }),
+  });
+}
+
+export function updateSubmission(id: string, question: SubmittedQuestion) {
+  return apiFetch<Submission>(`/submissions/${id}`, { method: "PUT", body: JSON.stringify({ question }) });
+}
+
+export function deleteSubmission(id: string) {
+  return apiFetch<{ deleted: string }>(`/submissions/${id}`, { method: "DELETE" });
+}
+
+export function reviewSubmission(id: string, decision: "accept" | "reject" | "request_changes", comment?: string) {
+  return apiFetch<Submission>(`/submissions/${id}/review`, {
+    method: "POST",
+    body: JSON.stringify({ decision, comment: comment ?? null }),
+  });
+}
+
+export function listSubjectTopics(subjectId: string) {
+  return apiFetch<{ id: string; name: string }[]>(`/subjects/${subjectId}/topics`);
+}
+
+// ---------- Credits ----------
+
+/** One credit: a question of the teacher's that was used in an exported paper.
+ *  Only the exam's name is exposed, never what else is on it. */
+export interface Credit {
+  id: string;
+  question_id: string;
+  question_text: string;
+  question_type: QuestionType;
+  marks: number;
+  exam_name: string;
+  subject_name: string;
+  subject_grade: string | null;
+  earned_at: string;
+}
+
+export function listCredits() {
+  return apiFetch<{ total: number; items: Credit[] }>("/credits");
 }
 
 // ---------- Display helpers ----------

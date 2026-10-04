@@ -3,12 +3,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.api.deps import get_current_teacher
+from app.api.deps import get_current_teacher, require_admin
 from app.core.template_store import get_template_store
 from app.schemas.template import PaperTemplate, TemplateSection
 from app.schemas.teacher import Teacher
 
-router = APIRouter(prefix="/api/v1/templates", tags=["templates"], dependencies=[Depends(get_current_teacher)])
+router = APIRouter(prefix="/api/v1/templates", tags=["templates"], dependencies=[Depends(require_admin)])
 
 
 class CreateTemplateRequest(BaseModel):

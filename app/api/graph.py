@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.api.deps import get_current_teacher, require_subject
+from app.api.deps import get_current_teacher, require_admin, require_subject
 from app.core.config import get_settings
 from app.core.document_store import get_document_store
 from app.core.graph_store import get_graph_store
@@ -19,7 +19,7 @@ from app.services.entity_extraction import extract_from_chunk, merge_into_graph
 from app.services.topic_dedup import merge_duplicate_topics
 from app.services.vector_indexing import delete_document_chunks, index_chunks
 
-router = APIRouter(prefix="/api/v1/graph", tags=["graph"], dependencies=[Depends(get_current_teacher)])
+router = APIRouter(prefix="/api/v1/graph", tags=["graph"], dependencies=[Depends(require_admin)])
 
 
 class IngestResponse(BaseModel):

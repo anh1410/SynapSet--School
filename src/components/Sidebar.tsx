@@ -9,11 +9,20 @@ import {
   Settings,
   X,
   GraduationCap,
+  BookOpen,
+  Users,
+  Inbox,
+  PlusCircle,
+  ListChecks,
+  Award,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/AuthContext";
 import type { Page } from "@/App";
 
-const nav: { id: Page; label: string; icon: typeof LayoutGrid }[] = [
+type NavItem = { id: Page; label: string; icon: typeof LayoutGrid };
+
+const adminWorkspaceNav: NavItem[] = [
   { id: "overview", label: "Overview", icon: LayoutGrid },
   { id: "upload", label: "Upload Materials", icon: UploadCloud },
   { id: "analysis", label: "Topic Analysis", icon: Network },
@@ -23,17 +32,41 @@ const nav: { id: Page; label: string; icon: typeof LayoutGrid }[] = [
   { id: "review", label: "Review & Export", icon: FileCheck2 },
 ];
 
+const adminSchoolNav: NavItem[] = [
+  { id: "submissions", label: "Teacher Submissions", icon: Inbox },
+  { id: "subjects", label: "Subjects", icon: BookOpen },
+  { id: "teachers", label: "Teachers", icon: Users },
+];
+
+const teacherNav: NavItem[] = [
+  { id: "mySubjects", label: "My Subjects", icon: BookOpen },
+  { id: "submitQuestion", label: "Submit a Question", icon: PlusCircle },
+  { id: "mySubmissions", label: "My Questions", icon: ListChecks },
+  { id: "myCredits", label: "My Credits", icon: Award },
+];
+
 export function Sidebar({
   active,
   onNavigate,
   open,
   onClose,
+  badges = {},
 }: {
   active: Page;
   onNavigate: (p: Page) => void;
   open: boolean;
   onClose: () => void;
+  /** Small count bubbles by page, e.g. submissions waiting for review. Zero hides it. */
+  badges?: Partial<Record<Page, number>>;
 }) {
+  const { isAdmin } = useAuth();
+  const sections: { heading: string; items: NavItem[] }[] = isAdmin
+    ? [
+        { heading: "Workspace", items: adminWorkspaceNav },
+        { heading: "School", items: adminSchoolNav },
+      ]
+    : [{ heading: "Workspace", items: teacherNav }];
+
   return (
     <>
       {open && (
@@ -64,31 +97,40 @@ export function Sidebar({
         </div>
 
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
-          <p className="px-3 pb-2 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Workspace
-          </p>
-          {nav.map((item) => {
-            const Icon = item.icon;
-            const isActive = active === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  onNavigate(item.id);
-                  onClose();
-                }}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-slate-600 hover:bg-secondary hover:text-foreground"
-                )}
-              >
-                <Icon className={cn("h-4 w-4", isActive ? "text-primary" : "text-slate-400")} />
-                {item.label}
-              </button>
-            );
-          })}
+          {sections.map((section) => (
+            <div key={section.heading} className="space-y-0.5">
+              <p className="px-3 pb-2 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {section.heading}
+              </p>
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = active === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      onNavigate(item.id);
+                      onClose();
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
+                      isActive
+                        ? "bg-accent text-accent-foreground"
+                        : "text-slate-600 hover:bg-secondary hover:text-foreground"
+                    )}
+                  >
+                    <Icon className={cn("h-4 w-4", isActive ? "text-primary" : "text-slate-400")} />
+                    {item.label}
+                    {(badges[item.id] ?? 0) > 0 && (
+                      <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">
+                        {badges[item.id]}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="border-t border-border p-3">

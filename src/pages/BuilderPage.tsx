@@ -828,7 +828,7 @@ export function BuilderPage({
                             <p className="text-sm text-foreground">
                               <LatexText text={res.question.text} />
                             </p>
-                            {res.question.question_type === "stem_diagram" && res.question.diagram && (
+                            {res.question.diagram && (
                               <DiagramImage diagram={res.question.diagram} />
                             )}
                             {res.question.question_type === "visual_worksheet" && res.question.grid_layout && (

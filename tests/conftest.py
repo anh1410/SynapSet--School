@@ -58,9 +58,9 @@ def sample_questions():
 
 
 @pytest.fixture
-def api_client(tmp_path, monkeypatch):
+def empty_client(tmp_path, monkeypatch):
     """A TestClient wired to isolated, per-test storage (graph/bank/chroma/uploads/exports)
-    so API tests never touch real project data."""
+    with NO accounts yet, so API tests never touch real project data."""
     monkeypatch.setenv("GRAPH_STORE_DIR", str(tmp_path / "graphs"))
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
@@ -69,11 +69,13 @@ def api_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
 
     from app.core.config import get_settings
+    from app.core.credit_store import get_credit_store
     from app.core.document_store import get_document_store
     from app.core.graph_store import get_graph_store
     from app.core.paper_store import get_paper_store
     from app.core.question_bank import get_question_bank
     from app.core.subject_store import get_subject_store
+    from app.core.submission_store import get_submission_store
     from app.core.teacher_store import get_teacher_store
     from app.core.template_store import get_template_store
     from app.core.vector_store import get_chroma_client
@@ -86,6 +88,8 @@ def api_client(tmp_path, monkeypatch):
         get_paper_store,
         get_chroma_client,
         get_subject_store,
+        get_submission_store,
+        get_credit_store,
         get_teacher_store,
         get_template_store,
     )
@@ -95,17 +99,61 @@ def api_client(tmp_path, monkeypatch):
     from app.main import app
 
     with TestClient(app) as client:
-        signup_resp = client.post(
-            "/api/v1/auth/signup",
-            json={"email": "test@school.edu", "password": "testpass123", "name": "Test Teacher"},
-        )
-        token = signup_resp.json()["access_token"]
-        client.headers["Authorization"] = f"Bearer {token}"
-
-        subject_resp = client.post("/api/v1/subjects", json={"name": "Test Subject"})
-        client.subject_id = subject_resp.json()["id"]
-
         yield client
 
     for cached in cached_fns:
         cached.cache_clear()
+
+
+@pytest.fixture
+def api_client(empty_client):
+    """empty_client with the first account signed up (which becomes the admin)
+    and one subject created, so most API tests start from a usable school."""
+    client = empty_client
+    signup_resp = client.post(
+        "/api/v1/auth/signup",
+        json={"email": "test@school.edu", "password": "testpass123", "name": "Test Teacher"},
+    )
+    client.headers["Authorization"] = f"Bearer {signup_resp.json()['access_token']}"
+
+    subject_resp = client.post("/api/v1/subjects", json={"name": "Test Subject", "grade": "5"})
+    client.subject_id = subject_resp.json()["id"]
+    return client
+
+
+@pytest.fixture
+def make_teacher(api_client):
+    """Creates a teacher account through the admin API and returns (client, id)
+    for that teacher, already logged in. Pass subject_ids to assign subjects."""
+    from app.main import app
+
+    def _make(email: str = "teacher@school.edu", name: str = "Ms. Iyer", subject_ids: list[str] | None = None):
+        created = api_client.post(
+            "/api/v1/admin/teachers",
+            json={"name": name, "email": email, "password": "teacherpass1", "subject_ids": subject_ids or []},
+        )
+        assert created.status_code == 200, created.text
+        client = TestClient(app)
+        login = client.post("/api/v1/auth/login", json={"email": email, "password": "teacherpass1"})
+        assert login.status_code == 200, login.text
+        client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+        return client, created.json()["id"]
+
+    return _make
+
+
+@pytest.fixture
+def upload_image():
+    """Uploads a tiny real PNG through the API as the given client; returns its image_id."""
+    import io
+
+    from PIL import Image
+
+    def _upload(client, size: tuple[int, int] = (40, 30)) -> str:
+        buf = io.BytesIO()
+        Image.new("RGB", size, "white").save(buf, format="PNG")
+        r = client.post("/api/v1/images", files={"file": ("pic.png", buf.getvalue(), "image/png")})
+        assert r.status_code == 200, r.text
+        return r.json()["image_id"]
+
+    return _upload

@@ -12,6 +12,7 @@ import {
 
 interface AuthContextValue {
   teacher: TeacherPublic | null;
+  isAdmin: boolean;
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name: string) => Promise<void>;
@@ -20,7 +21,7 @@ interface AuthContextValue {
   activeSubjectId: string | null;
   setActiveSubjectId: (id: string) => void;
   refreshSubjects: () => Promise<api.Subject[]>;
-  createSubject: (name: string) => Promise<api.Subject>;
+  createSubject: (name: string, grade: string) => Promise<api.Subject>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -96,8 +97,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     persistActiveSubjectId(id);
   };
 
-  const createSubject = async (name: string) => {
-    const subject = await api.createSubject(name);
+  const createSubject = async (name: string, grade: string) => {
+    const subject = await api.createSubject(name, grade);
     const list = await loadSubjects();
     setActiveSubjectId(subject.id);
     return list.find((s) => s.id === subject.id) ?? subject;
@@ -107,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         teacher,
+        isAdmin: teacher?.role === "admin",
         ready,
         login: doLogin,
         signup: doSignup,

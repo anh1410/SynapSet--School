@@ -37,18 +37,17 @@ def test_delete_nonexistent_template_is_404(api_client):
     assert r.status_code == 404
 
 
-def test_templates_are_teacher_scoped(api_client):
-    from fastapi.testclient import TestClient
-
-    from app.main import app
-
+def test_templates_are_scoped_to_the_admin_who_made_them(api_client, make_teacher):
     api_client.post("/api/v1/templates", json=_template_payload())
 
-    other = TestClient(app)
-    signup = other.post(
-        "/api/v1/auth/signup",
-        json={"email": "other-template-teacher@school.edu", "password": "otherpass123", "name": "Mr. Rao"},
-    )
-    other.headers["Authorization"] = f"Bearer {signup.json()['access_token']}"
+    # A second admin (a teacher promoted by the first) starts with no templates of their own.
+    other_admin, other_id = make_teacher(email="second-admin@school.edu", name="Second Admin")
+    api_client.patch(f"/api/v1/admin/teachers/{other_id}", json={"role": "admin"})
 
-    assert other.get("/api/v1/templates").json() == []
+    assert other_admin.get("/api/v1/templates").json() == []
+
+
+def test_teachers_cannot_use_templates(api_client, make_teacher):
+    teacher, _ = make_teacher()
+    assert teacher.get("/api/v1/templates").status_code == 403
+    assert teacher.post("/api/v1/templates", json=_template_payload()).status_code == 403
