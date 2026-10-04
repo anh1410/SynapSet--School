@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.core.academic import academic_year_for, check_academic_year, check_term
 
 from app.schemas.bloom import BloomLevel
 
@@ -107,3 +109,17 @@ class Question(BaseModel):
     source_document: str | None = None
     author_id: str | None = None  # the account that submitted it (None for AI-generated questions)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    # School-year / term tags, so a growing bank can be narrowed to "this year" or "Term 2".
+    # The year is automatic (from created_at); the term is optional.
+    academic_year: str | None = None
+    term: str | None = None
+
+    _check_term = field_validator("term")(check_term)
+    _check_year = field_validator("academic_year")(check_academic_year)
+
+    @model_validator(mode="after")
+    def _default_year(self) -> "Question":
+        if self.academic_year is None:
+            self.academic_year = academic_year_for(self.created_at)
+        return self

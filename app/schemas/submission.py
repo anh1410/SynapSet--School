@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.academic import check_term
 
 from app.schemas.bloom import BloomLevel
 from app.schemas.duplicate import DuplicateMatch
@@ -39,6 +41,7 @@ class SubmittedQuestion(BaseModel):
     marks: int
     bloom_level: BloomLevel = BloomLevel.UNDERSTAND  # ignored when `difficulty` is given
     difficulty: Literal["easy", "medium", "hard"] | None = None  # the teacher's own call
+    term: str | None = None  # which term the question is for; the school year is automatic
     topic_ids: list[str] = Field(default_factory=list)
     options: list[str] | None = None
     correct_answer: str | None = None
@@ -46,6 +49,8 @@ class SubmittedQuestion(BaseModel):
     is_true: bool | None = None
     diagram: SubmittedDiagram | None = None
     grid_layout: SubmittedGrid | None = None
+
+    _term = field_validator("term")(check_term)
 
 
 class SubmissionCreate(BaseModel):

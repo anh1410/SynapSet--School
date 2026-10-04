@@ -24,13 +24,14 @@ class PaperStore:
             conn.execute(
                 """INSERT INTO paper_blueprints (
                     id, teacher_id, subject_id, name, total_marks, duration_minutes,
-                    sections, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    sections, status, academic_year, term, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     teacher_id = excluded.teacher_id, subject_id = excluded.subject_id,
                     name = excluded.name, total_marks = excluded.total_marks,
                     duration_minutes = excluded.duration_minutes, sections = excluded.sections,
-                    status = excluded.status, created_at = excluded.created_at,
+                    status = excluded.status, academic_year = excluded.academic_year,
+                    term = excluded.term, created_at = excluded.created_at,
                     updated_at = excluded.updated_at""",
                 (
                     blueprint.id,
@@ -41,6 +42,8 @@ class PaperStore:
                     blueprint.duration_minutes,
                     dump([s.model_dump(mode="json") for s in blueprint.sections]),
                     blueprint.status,
+                    blueprint.academic_year,
+                    blueprint.term,
                     blueprint.created_at.isoformat(),
                     blueprint.updated_at.isoformat(),
                 ),

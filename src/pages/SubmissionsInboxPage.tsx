@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, History, Inbox, MessageSquareWarning, Search, X } from "lucide-react";
+import { AlertTriangle, Check, History, Inbox, MessageSquareWarning, Pencil, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,9 +11,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { QuestionPreview } from "@/components/QuestionPreview";
 import { StatusBadge, SubmissionHistory } from "@/components/SubmissionBits";
+import { SubmitQuestionPage } from "@/pages/SubmitQuestionPage";
 import { useAuth } from "@/lib/AuthContext";
 import {
   GRADES,
+  adminEditSubmission,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_ORDER,
   gradeLabel,
@@ -41,17 +43,19 @@ const TABS: { id: SubmissionStatus; label: string }[] = [
 const textareaClass =
   "flex w-full rounded-lg border border-input bg-white px-3 py-2 text-sm shadow-subtle placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-primary";
 
-type Mode = "changes" | "reject" | null;
+type Mode = "accept" | "changes" | "reject" | null;
 
 function ReviewCard({
   sub,
   selected,
   onSelect,
+  onEdit,
   onReview,
 }: {
   sub: Submission;
   selected: boolean;
   onSelect: (on: boolean) => void;
+  onEdit: () => void;
   onReview: (decision: "accept" | "reject" | "request_changes", comment?: string) => Promise<void>;
 }) {
   const [mode, setMode] = useState<Mode>(null);
@@ -117,7 +121,7 @@ function ReviewCard({
 
         {sub.admin_comment && !pending && (
           <p className="rounded-lg bg-secondary/40 p-2.5 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Your note: </span>
+            <span className="font-medium text-foreground">Your note to the teacher: </span>
             {sub.admin_comment}
           </p>
         )}
@@ -127,7 +131,11 @@ function ReviewCard({
         {mode && (
           <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
             <label className="block text-xs font-medium text-foreground">
-              {mode === "changes" ? "What should the teacher change?" : "Reason (optional, the teacher will see it)"}
+              {mode === "changes"
+                ? "What should the teacher change?"
+                : mode === "accept"
+                  ? "A note for the teacher (optional)"
+                  : "Reason (optional, the teacher will see it)"}
             </label>
             <textarea
               className={textareaClass}
@@ -135,16 +143,22 @@ function ReviewCard({
               value={comment}
               autoFocus
               onChange={(e) => setComment(e.target.value)}
-              placeholder={mode === "changes" ? "e.g. Option C is also correct — please fix." : "e.g. Not in this term's syllabus."}
+              placeholder={
+                mode === "changes"
+                  ? "e.g. Option C is also correct — please fix."
+                  : mode === "accept"
+                    ? "e.g. Nice question, great diagram."
+                    : "e.g. Not in this term's syllabus."
+              }
             />
             <div className="flex gap-2">
               <Button
                 size="sm"
                 variant={mode === "reject" ? "destructive" : "primary"}
                 disabled={busy || (mode === "changes" && !comment.trim())}
-                onClick={() => run(mode === "changes" ? "request_changes" : "reject", comment)}
+                onClick={() => run(mode === "changes" ? "request_changes" : mode === "accept" ? "accept" : "reject", comment)}
               >
-                {mode === "changes" ? "Send back" : "Reject question"}
+                {mode === "changes" ? "Send back" : mode === "accept" ? "Accept into bank" : "Reject question"}
               </Button>
               <Button
                 size="sm"
@@ -168,6 +182,12 @@ function ReviewCard({
             <>
               <Button size="sm" disabled={busy} onClick={() => run("accept")}>
                 <Check className="h-3.5 w-3.5" /> Accept into bank
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => setMode("accept")}>
+                Accept with note
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={onEdit}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
               </Button>
               <Button size="sm" variant="outline" disabled={busy} onClick={() => setMode("changes")}>
                 <MessageSquareWarning className="h-3.5 w-3.5" /> Request changes
@@ -203,6 +223,7 @@ export function SubmissionsInboxPage({ onChanged }: { onChanged: () => void }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [editing, setEditing] = useState<Submission | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 250);
@@ -277,6 +298,21 @@ export function SubmissionsInboxPage({ onChanged }: { onChanged: () => void }) {
     });
 
   const pendingIds = (subs ?? []).filter((s) => s.status === "submitted").map((s) => s.id);
+
+  if (editing) {
+    return (
+      <SubmitQuestionPage
+        key={editing.id}
+        editing={editing}
+        save={(question) => adminEditSubmission(editing.id, question)}
+        onDone={() => {
+          setEditing(null);
+          load();
+        }}
+        onCancel={() => setEditing(null)}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -411,6 +447,7 @@ export function SubmissionsInboxPage({ onChanged }: { onChanged: () => void }) {
               sub={s}
               selected={selected.has(s.id)}
               onSelect={(on) => toggle(s.id, on)}
+              onEdit={() => setEditing(s)}
               onReview={async (decision, comment) => {
                 await reviewSubmission(s.id, decision, comment);
                 afterReview();

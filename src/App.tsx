@@ -13,6 +13,7 @@ import { SubjectsPage } from "@/pages/SubjectsPage";
 import { TeachersPage } from "@/pages/TeachersPage";
 import { MySubjectsPage } from "@/pages/MySubjectsPage";
 import { MySubmissionsPage } from "@/pages/MySubmissionsPage";
+import { ActivityLogPage } from "@/pages/ActivityLogPage";
 import { MyCreditsPage } from "@/pages/MyCreditsPage";
 import { SubmitQuestionPage } from "@/pages/SubmitQuestionPage";
 import { SubmissionsInboxPage } from "@/pages/SubmissionsInboxPage";
@@ -34,6 +35,7 @@ export type Page =
   | "subjects"
   | "teachers"
   | "submissions"
+  | "activity"
   | "mySubjects"
   | "mySubmissions"
   | "myCredits"
@@ -160,6 +162,7 @@ function AdminShell() {
             )}
             {page === "subjects" && <SubjectsPage />}
             {page === "teachers" && <TeachersPage />}
+            {page === "activity" && <ActivityLogPage />}
             {page === "submissions" && <SubmissionsInboxPage onChanged={refreshPending} />}
           </div>
         </main>

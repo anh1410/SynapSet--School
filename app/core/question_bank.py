@@ -41,6 +41,8 @@ def _question_params(q: Question) -> tuple:
         q.is_duplicate_of,
         q.source_document,
         q.author_id,
+        q.academic_year,
+        q.term,
         q.created_at.isoformat(),
     )
 
@@ -59,8 +61,9 @@ class QuestionBank:
                     id, subject_id, text, question_type, marks, bloom_level, topic_ids, co_ids,
                     unit, options, correct_answer, match_pairs, match_right_order, is_true,
                     diagram, grid_layout,
-                    difficulty_score, embedding_id, is_duplicate_of, source_document, author_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    difficulty_score, embedding_id, is_duplicate_of, source_document, author_id,
+                    academic_year, term, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     subject_id = excluded.subject_id, text = excluded.text,
                     question_type = excluded.question_type, marks = excluded.marks,
@@ -71,7 +74,8 @@ class QuestionBank:
                     diagram = excluded.diagram, grid_layout = excluded.grid_layout,
                     difficulty_score = excluded.difficulty_score, embedding_id = excluded.embedding_id,
                     is_duplicate_of = excluded.is_duplicate_of, source_document = excluded.source_document,
-                    author_id = excluded.author_id, created_at = excluded.created_at""",
+                    author_id = excluded.author_id, academic_year = excluded.academic_year,
+                    term = excluded.term, created_at = excluded.created_at""",
                 _question_params(question),
             )
 

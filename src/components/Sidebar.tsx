@@ -15,6 +15,7 @@ import {
   PlusCircle,
   ListChecks,
   Award,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/AuthContext";
@@ -36,6 +37,7 @@ const adminSchoolNav: NavItem[] = [
   { id: "submissions", label: "Teacher Submissions", icon: Inbox },
   { id: "subjects", label: "Subjects", icon: BookOpen },
   { id: "teachers", label: "Teachers", icon: Users },
+  { id: "activity", label: "Activity Log", icon: ScrollText },
 ];
 
 const teacherNav: NavItem[] = [

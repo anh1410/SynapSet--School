@@ -69,6 +69,7 @@ def empty_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
 
     from app.core.config import get_settings
+    from app.core.audit_store import get_audit_store
     from app.core.credit_store import get_credit_store
     from app.core.document_store import get_document_store
     from app.core.graph_store import get_graph_store
@@ -90,6 +91,7 @@ def empty_client(tmp_path, monkeypatch):
         get_subject_store,
         get_submission_store,
         get_credit_store,
+        get_audit_store,
         get_teacher_store,
         get_template_store,
     )

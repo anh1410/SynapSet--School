@@ -34,7 +34,7 @@ export function StatusBadge({ status }: { status: SubmissionStatus }) {
 
 const EVENT_LABEL: Record<SubmissionEvent["kind"], string> = {
   submitted: "submitted this question",
-  edited: "edited it",
+  edited: "edited it",  // an admin fixing a waiting question, or the teacher revising their own
   resubmitted: "revised it and resubmitted",
   changes_requested: "asked for changes",
   accepted: "accepted it into the bank",

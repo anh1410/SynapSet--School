@@ -5,11 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from app.api.deps import require_admin
+from app.core.audit_store import get_audit_store, record
 from app.core.credit_store import get_credit_store
 from app.core.security import hash_password
 from app.core.subject_store import get_subject_store
 from app.core.submission_store import get_submission_store
 from app.core.teacher_store import get_teacher_store
+from app.schemas.audit import AuditPage
 from app.schemas.teacher import Role, Teacher
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -110,7 +112,7 @@ def list_teachers() -> list[TeacherAdminView]:
 
 
 @router.post("/teachers", response_model=TeacherAdminView)
-def create_teacher(request: CreateTeacherRequest) -> TeacherAdminView:
+def create_teacher(request: CreateTeacherRequest, admin: Teacher = Depends(require_admin)) -> TeacherAdminView:
     """Admins create teacher accounts (there's no public signup after the first
     admin) and share the password with the teacher."""
     store = get_teacher_store()
@@ -127,6 +129,7 @@ def create_teacher(request: CreateTeacherRequest) -> TeacherAdminView:
     )
     store.add(teacher)
     get_subject_store().set_teacher_subjects(teacher.id, request.subject_ids)
+    record(admin, "teacher.create", f"Created the teacher account for {teacher.name} ({teacher.email})", "teacher", teacher.id)
     return _view(teacher, get_subject_store().assignments_by_teacher())
 
 
@@ -154,6 +157,13 @@ def update_teacher(
 
     updated = target.model_copy(update=changes)
     get_teacher_store().add(updated)
+    what = [label for key, label in (
+        ("name", f"renamed to {updated.name}"),
+        ("role", f"made {updated.role}"),
+        ("active", "activated" if updated.active else "deactivated"),
+        ("password_hash", "password reset"),
+    ) if key in changes]
+    record(admin, "teacher.update", f"{target.name}: {', '.join(what) or 'no changes'}", "teacher", target.id)
     return _view(updated, get_subject_store().assignments_by_teacher())
 
 
@@ -169,15 +179,41 @@ def delete_teacher(teacher_id: str, admin: Teacher = Depends(require_admin)) -> 
             detail="This teacher has submitted questions, so the account can't be deleted. Deactivate it instead.",
         )
     get_teacher_store().remove(target.id)
+    record(admin, "teacher.delete", f"Deleted the account of {target.name} ({target.email})", "teacher", target.id)
     return {"deleted": target.id}
 
 
 @router.put("/teachers/{teacher_id}/subjects", response_model=TeacherAdminView)
-def set_teacher_subjects(teacher_id: str, request: SetSubjectsRequest) -> TeacherAdminView:
+def set_teacher_subjects(
+    teacher_id: str, request: SetSubjectsRequest, admin: Teacher = Depends(require_admin)
+) -> TeacherAdminView:
     """Replaces the full list of subjects this teacher is assigned to."""
     target = _get_target(teacher_id)
     if target.role == "admin":
         raise HTTPException(status_code=400, detail="Admins can already access every subject")
     _require_subjects_exist(request.subject_ids)
     get_subject_store().set_teacher_subjects(target.id, request.subject_ids)
+    record(admin, "teacher.subjects", f"{target.name} now teaches {len(request.subject_ids)} subject(s)", "teacher", target.id)
     return _view(target, get_subject_store().assignments_by_teacher())
+
+
+@router.get("/audit", response_model=AuditPage)
+def activity_log(
+    actor_id: str | None = None,
+    area: str | None = None,
+    action: str | None = None,
+    q: str | None = None,
+    before: str | None = None,
+    limit: int = 50,
+) -> AuditPage:
+    """The school's activity log, newest first. Page by passing the last row's `at` as `before`."""
+    if before:
+        try:
+            datetime.fromisoformat(before)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="before must be an ISO timestamp") from exc
+    items, has_more = get_audit_store().find(
+        actor_id=actor_id, area=area, action=action, q=(q or "").strip() or None, before=before,
+        limit=max(1, min(limit, 200)),
+    )
+    return AuditPage(items=items, has_more=has_more)

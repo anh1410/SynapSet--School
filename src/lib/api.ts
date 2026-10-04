@@ -86,6 +86,17 @@ export const DEFAULT_MARKS: Record<QuestionType, number> = {
   visual_worksheet: 1,
 };
 
+// ---------- School year & term ----------
+
+// Keep in step with TERMS in app/core/academic.py.
+export const TERMS = ["Term 1", "Term 2", "Annual"] as const;
+
+/** The Indian school year runs June-May: October 2026 is "2026-27", so is February 2027. */
+export function academicYearFor(date: Date = new Date()): string {
+  const start = date.getMonth() >= 5 ? date.getFullYear() : date.getFullYear() - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}
+
 // ---------- Core resources ----------
 
 export interface MatchPair {
@@ -148,6 +159,8 @@ export interface Question {
   is_duplicate_of: string | null;
   source_document: string | null;
   author_id?: string | null; // the teacher who submitted it, when it came from a submission
+  academic_year?: string | null; // e.g. "2026-27", set automatically
+  term?: string | null;
   created_at: string;
   diagram: DiagramSpec | null;
   grid_layout: GridLayout | null;
@@ -231,6 +244,8 @@ export interface PaperBlueprint {
   sections: BlueprintSection[];
   question_ids: string[];
   status: BlueprintStatus;
+  academic_year: string; // defaults to the year it was made in
+  term: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -664,6 +679,8 @@ export function createBlueprint(data: {
   name: string;
   total_marks: number;
   duration_minutes?: number;
+  academic_year?: string;
+  term?: string;
   sections: BlueprintSectionInput[];
 }) {
   return apiFetch<PaperBlueprint>("/paper/blueprints", { method: "POST", body: JSON.stringify(data) });
@@ -685,6 +702,8 @@ export function updateBlueprint(
     duration_minutes: number;
     sections: BlueprintSectionInput[];
     status: BlueprintStatus;
+    academic_year: string;
+    term: string; // "" clears it
   }>
 ) {
   return apiFetch<PaperBlueprint>(`/paper/blueprints/${id}`, { method: "PATCH", body: JSON.stringify(data) });
@@ -731,6 +750,7 @@ export interface SubmittedQuestion {
   question_type: QuestionType;
   marks: number;
   difficulty: Difficulty;
+  term?: string | null;
   topic_ids: string[];
   options?: string[] | null;
   correct_answer?: string | null;
@@ -816,6 +836,11 @@ export function updateSubmission(id: string, question: SubmittedQuestion) {
   return apiFetch<Submission>(`/submissions/${id}`, { method: "PUT", body: JSON.stringify({ question }) });
 }
 
+/** Admin only: fix a waiting submission (typo, wrong answer) instead of sending it back. */
+export function adminEditSubmission(id: string, question: SubmittedQuestion) {
+  return apiFetch<Submission>(`/submissions/${id}/question`, { method: "PATCH", body: JSON.stringify({ question }) });
+}
+
 export function deleteSubmission(id: string) {
   return apiFetch<{ deleted: string }>(`/submissions/${id}`, { method: "DELETE" });
 }
@@ -829,6 +854,33 @@ export function reviewSubmission(id: string, decision: "accept" | "reject" | "re
 
 export function listSubjectTopics(subjectId: string) {
   return apiFetch<{ id: string; name: string }[]>(`/subjects/${subjectId}/topics`);
+}
+
+// ---------- Activity log (admin) ----------
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  actor_id: string;
+  actor_name: string;
+  action: string; // "<area>.<verb>"
+  target_type: string;
+  target_id: string;
+  summary: string;
+}
+
+export const AUDIT_AREAS: { id: string; label: string }[] = [
+  { id: "question", label: "Question bank" },
+  { id: "submission", label: "Submissions" },
+  { id: "paper", label: "Papers" },
+  { id: "teacher", label: "Teachers" },
+  { id: "subject", label: "Subjects" },
+];
+
+export function listAudit(filters: { actor_id?: string; area?: string; q?: string; before?: string; limit?: number }) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value) params.set(key, String(value));
+  return apiFetch<{ items: AuditEntry[]; has_more: boolean }>(`/admin/audit?${params.toString()}`);
 }
 
 // ---------- Credits ----------

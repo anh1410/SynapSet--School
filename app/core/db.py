@@ -71,6 +71,19 @@ CREATE TABLE IF NOT EXISTS credits (
 );
 CREATE INDEX IF NOT EXISTS idx_credits_teacher ON credits (teacher_id);
 
+-- Append-only "who did what" trail for admins.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    at TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    actor_name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    summary TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log (at);
+
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
     subject_id TEXT NOT NULL,
@@ -105,6 +118,8 @@ CREATE TABLE IF NOT EXISTS questions (
     is_duplicate_of TEXT,
     source_document TEXT,
     author_id TEXT,
+    academic_year TEXT,
+    term TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -117,6 +132,8 @@ CREATE TABLE IF NOT EXISTS paper_blueprints (
     duration_minutes INTEGER,
     sections TEXT NOT NULL,
     status TEXT NOT NULL,
+    academic_year TEXT,
+    term TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -153,6 +170,10 @@ _MIGRATIONS = [
     "ALTER TABLE teachers ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE subjects ADD COLUMN grade TEXT",
     "ALTER TABLE questions ADD COLUMN author_id TEXT",
+    "ALTER TABLE questions ADD COLUMN academic_year TEXT",
+    "ALTER TABLE questions ADD COLUMN term TEXT",
+    "ALTER TABLE paper_blueprints ADD COLUMN academic_year TEXT",
+    "ALTER TABLE paper_blueprints ADD COLUMN term TEXT",
 ]
 
 

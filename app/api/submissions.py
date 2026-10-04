@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.api.deps import get_current_teacher, require_admin, require_subject
+from app.core.audit_store import record, snippet
 from app.core.graph_store import get_graph_store
 from app.core.question_bank import get_question_bank
 from app.core.subject_store import get_subject_store
@@ -84,6 +85,13 @@ def _refresh_duplicates(submission_id: str) -> None:
     if sub is None or sub.status not in OPEN_STATUSES:
         return
     get_submission_store().set_duplicates(submission_id, _duplicates_for(sub.question))
+
+
+def _rebuilt(question: Question, original: Submission) -> Question:
+    """An edit keeps the question's original timestamp and school year."""
+    return question.model_copy(
+        update={"created_at": original.question.created_at, "academic_year": original.question.academic_year}
+    )
 
 
 def _difficulty_for(question: Question) -> float | None:
@@ -233,7 +241,7 @@ def update_submission(
     if sub.status not in OPEN_STATUSES:
         raise HTTPException(status_code=409, detail="This question has already been reviewed and can't be edited")
 
-    question = _build_question(request.question, sub.subject_id, author_id=sub.teacher_id, question_id=sub.question.id)
+    question = _rebuilt(_build_question(request.question, sub.subject_id, author_id=sub.teacher_id, question_id=sub.question.id), sub)
     resubmitting = sub.status == "changes_requested"
     event = SubmissionEvent(kind="resubmitted" if resubmitting else "edited", by=teacher.id, by_name=teacher.name)
     updated = sub.model_copy(
@@ -260,6 +268,8 @@ def delete_submission(submission_id: str, teacher: Teacher = Depends(get_current
     if sub.status == "accepted":
         raise HTTPException(status_code=409, detail="An accepted question is part of the question bank and can't be deleted here")
     get_submission_store().delete(sub.id)
+    if sub.teacher_id != teacher.id:
+        record(teacher, "submission.delete", f"Deleted {get_teacher_store().get(sub.teacher_id).name if get_teacher_store().get(sub.teacher_id) else 'a teacher'}'s submission: {snippet(sub.question.text)}", "submission", sub.id)
     return {"deleted": sub.id}
 
 
@@ -310,4 +320,48 @@ def review_submission(
         }
     )
     get_submission_store().add(updated)
+    author = get_teacher_store().get(sub.teacher_id)
+    record(
+        admin,
+        f"submission.{request.decision}",
+        f"{ {'accept': 'Accepted', 'reject': 'Rejected', 'request_changes': 'Sent back'}[request.decision] } {author.name if author else 'a teacher'}'s question: {snippet(question.text)}",
+        "submission",
+        sub.id,
+    )
+    return _out(updated, _Context(), include_hits=True)
+
+
+@router.patch("/{submission_id}/question", response_model=SubmissionOut)
+def admin_edit_question(
+    submission_id: str, request: SubmissionUpdate, background: BackgroundTasks, admin: Teacher = Depends(require_admin)
+) -> SubmissionOut:
+    """An admin fixes a typo or tidies a waiting submission instead of bouncing it back.
+    The author, id and status are untouched; the history records who edited it."""
+    sub = get_submission_store().get(submission_id)
+    if sub is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if sub.status != "submitted":
+        raise HTTPException(status_code=409, detail="Only a submission that is waiting for review can be edited")
+
+    question = _rebuilt(
+        _build_question(request.question, sub.subject_id, author_id=sub.teacher_id, question_id=sub.question.id), sub
+    )
+    updated = sub.model_copy(
+        update={
+            "question": question,
+            "duplicates": [],  # recomputed below
+            "history": [*sub.history, SubmissionEvent(kind="edited", by=admin.id, by_name=admin.name)],
+            "updated_at": datetime.now(UTC),
+        }
+    )
+    get_submission_store().add(updated)
+    background.add_task(_refresh_duplicates, updated.id)
+    author = get_teacher_store().get(sub.teacher_id)
+    record(
+        admin,
+        "submission.edit",
+        f"Edited {author.name if author else 'a teacher'}'s waiting question: {snippet(question.text)}",
+        "submission",
+        sub.id,
+    )
     return _out(updated, _Context(), include_hits=True)

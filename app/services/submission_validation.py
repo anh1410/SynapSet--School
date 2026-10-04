@@ -199,6 +199,7 @@ def build_question(
         marks=payload.marks,
         bloom_level=bloom,
         difficulty_score=difficulty_score,
+        term=payload.term,
         topic_ids=_topics(payload, valid_topic_ids),
         **fields,
     )

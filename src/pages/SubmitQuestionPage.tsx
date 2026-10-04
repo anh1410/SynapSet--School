@@ -15,6 +15,7 @@ import {
   DIFFICULTY_LEVELS,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_ORDER,
+  TERMS,
   createSubmission,
   difficultyBucket,
   listSubjectTopics,
@@ -61,6 +62,7 @@ interface FormState {
   text: string;
   marks: number;
   difficulty: Difficulty;
+  term: string;
   topicIds: string[];
   options: string[];
   correctIndex: number | null;
@@ -84,6 +86,7 @@ function emptyForm(subjectId: string): FormState {
     text: "",
     marks: DEFAULT_MARKS.mcq,
     difficulty: "medium",
+    term: "",
     topicIds: [],
     options: ["", "", "", ""],
     correctIndex: null,
@@ -114,6 +117,7 @@ function formFromSubmission(sub: Submission): FormState {
     text: q.question_type === "visual_worksheet" ? (grid?.instruction ?? q.text) : q.text,
     marks: q.marks,
     difficulty: difficultyBucket(q.difficulty_score).toLowerCase() as Difficulty,
+    term: q.term ?? "",
     topicIds: q.topic_ids,
     options,
     correctIndex: idx >= 0 ? idx : null,
@@ -141,6 +145,7 @@ function toSubmitted(f: FormState): SubmittedQuestion {
     question_type: f.type,
     marks: f.marks,
     difficulty: f.difficulty,
+    term: f.term || null,
     topic_ids: f.topicIds,
   };
 
@@ -224,10 +229,13 @@ export function SubmitQuestionPage({
   editing,
   onDone,
   onCancel,
+  save,
 }: {
   editing: Submission | null;
   onDone: (sub: Submission) => void;
   onCancel: () => void;
+  /** Replaces the default save (the teacher's own create/update) - the admin's "fix before accepting" uses this. */
+  save?: (question: SubmittedQuestion) => Promise<Submission>;
 }) {
   const { subjects, activeSubjectId } = useAuth();
   const [form, setForm] = useState<FormState>(() =>
@@ -324,7 +332,11 @@ export function SubmitQuestionPage({
     setError(null);
     try {
       const body = toSubmitted(form);
-      const saved = editing ? await updateSubmission(editing.id, body) : await createSubmission(form.subjectId, body);
+      const saved = save
+        ? await save(body)
+        : editing
+          ? await updateSubmission(editing.id, body)
+          : await createSubmission(form.subjectId, body);
       onDone(saved);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't send the question. Please try again.");
@@ -333,7 +345,8 @@ export function SubmitQuestionPage({
     }
   };
 
-  const resubmitting = editing?.status === "changes_requested";
+  const resubmitting = !save && editing?.status === "changes_requested";
+  const byAdmin = !!save;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -346,14 +359,18 @@ export function SubmitQuestionPage({
           >
             <ArrowLeft className="h-3 w-3" /> Back
           </button>
-          <h1 className="text-lg font-semibold text-foreground">{editing ? "Edit your question" : "Submit a question"}</h1>
+          <h1 className="text-lg font-semibold text-foreground">
+            {byAdmin ? "Edit this submission" : editing ? "Edit your question" : "Submit a question"}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Your admin reviews every question before it can be used in an exam paper.
+            {byAdmin
+              ? `Fix it before accepting. ${editing?.teacher_name ?? "The teacher"} stays credited as the author.`
+              : "Your admin reviews every question before it can be used in an exam paper."}
           </p>
         </div>
       </div>
 
-      {editing?.status === "changes_requested" && editing.admin_comment && (
+      {!byAdmin && editing?.status === "changes_requested" && editing.admin_comment && (
         <div className="flex gap-2.5 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <div>
@@ -425,6 +442,16 @@ export function SubmitQuestionPage({
                   </div>
                 </Field>
               )}
+              <Field label="Term (optional)" hint="Which term this question is for.">
+                <Select value={form.term} onChange={(e) => set({ term: e.target.value })}>
+                  <option value="">Not specified</option>
+                  {TERMS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
               {topics.length > 0 && (
                 <div className="sm:col-span-2">
                   <Field label="Topics (optional)" hint="Helps your admin put the question in the right part of a paper.">
@@ -751,7 +778,7 @@ export function SubmitQuestionPage({
           <div className="flex gap-2">
             <Button type="submit" disabled={busy} className="flex-1">
               {editing ? <Save className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-              {busy ? "Sending…" : resubmitting ? "Resubmit for review" : editing ? "Save changes" : "Submit for review"}
+              {busy ? (byAdmin ? "Saving…" : "Sending…") : resubmitting ? "Resubmit for review" : editing ? "Save changes" : "Submit for review"}
             </Button>
             <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
               Cancel

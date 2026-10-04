@@ -69,7 +69,15 @@ function SubmissionCard({
         )}
 
         {sub.status === "accepted" && (
-          <p className="text-xs text-success">It's in the question bank. You earn a credit each time it's used in an exam.</p>
+          <div className="space-y-1.5">
+            <p className="text-xs text-success">It's in the question bank. You earn a credit each time it's used in an exam.</p>
+            {sub.admin_comment && (
+              <p className="rounded-lg bg-success/5 p-2.5 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Note from your admin: </span>
+                {sub.admin_comment}
+              </p>
+            )}
+          </div>
         )}
 
         {showHistory && <SubmissionHistory history={sub.history} />}

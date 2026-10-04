@@ -3,6 +3,7 @@ import { FileCheck2, FileText, FileType, Download, FileStack, Pencil, Check } fr
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -12,11 +13,14 @@ import { DiagramImage } from "@/components/DiagramImage";
 import { VisualWorksheetGrid } from "@/components/VisualWorksheetGrid";
 import { LatexText } from "@/components/LatexText";
 import {
+  TERMS,
+  academicYearFor,
   difficultyBucket,
   exportBlueprint,
   getBlueprint,
   listBlueprints,
   saveQuestion,
+  updateBlueprint,
   type DifficultyBucket,
   type ExportVariant,
   type PaperBlueprint,
@@ -25,6 +29,13 @@ import {
 import type { Page } from "@/App";
 import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
+
+/** Years a paper can be filed under: the last few school years plus next year, and whatever it already has. */
+function yearChoices(extra: (string | null | undefined)[] = []): string[] {
+  const now = new Date();
+  const choices = [-1, 0, 1, 2, 3].map((back) => academicYearFor(new Date(now.getFullYear() - back, now.getMonth(), 15)));
+  return [...new Set([...choices, ...extra.filter((y): y is string => !!y)])].sort().reverse();
+}
 
 export function ReviewExportPage({
   blueprintId,
@@ -47,6 +58,10 @@ export function ReviewExportPage({
 
   const [history, setHistory] = useState<PaperBlueprint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  // Old exams stay out of the way by default: the list opens on the current school year.
+  const [yearFilter, setYearFilter] = useState(academicYearFor());
+  const [termFilter, setTermFilter] = useState("all");
+  const [tagError, setTagError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!blueprintId) return;
@@ -80,6 +95,23 @@ export function ReviewExportPage({
       setExporting(null);
     }
   };
+
+  const handleTag = async (patch: { academic_year?: string; term?: string }) => {
+    if (!blueprint) return;
+    setTagError(null);
+    try {
+      const updated = await updateBlueprint(blueprint.id, patch);
+      setBlueprint(updated);
+      loadHistory();
+    } catch (err) {
+      setTagError(err instanceof Error ? err.message : "Couldn't update the paper.");
+    }
+  };
+
+  const shownHistory = history.filter(
+    (e) => (yearFilter === "all" || e.academic_year === yearFilter) && (termFilter === "all" || (termFilter === "none" ? !e.term : e.term === termFilter))
+  );
+  const historyYears = yearChoices(history.map((e) => e.academic_year));
 
   const handleSaveEdit = async (question: Question) => {
     setSavingId(question.id);
@@ -274,6 +306,30 @@ export function ReviewExportPage({
                         <span className="font-medium text-foreground">{row.value}</span>
                       </div>
                     ))}
+                    <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-muted-foreground">School year</label>
+                        <Select value={blueprint.academic_year} onChange={(e) => handleTag({ academic_year: e.target.value })}>
+                          {yearChoices([blueprint.academic_year]).map((y) => (
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-muted-foreground">Term</label>
+                        <Select value={blueprint.term ?? ""} onChange={(e) => handleTag({ term: e.target.value })}>
+                          <option value="">Not specified</option>
+                          {TERMS.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      {tagError && <p className="col-span-2 text-xs text-destructive">{tagError}</p>}
+                    </div>
                     {questions.length > 0 && (
                       <div className="border-t border-border pt-3">
                         <div className="flex gap-1.5">
@@ -293,17 +349,43 @@ export function ReviewExportPage({
         <TabsContent value="history" className="mt-4">
           <Card>
             <CardContent className="p-0">
+              <div className="flex flex-wrap items-center gap-2 border-b border-border px-6 py-3">
+                <Select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="w-36">
+                  <option value="all">All years</option>
+                  {historyYears.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </Select>
+                <Select value={termFilter} onChange={(e) => setTermFilter(e.target.value)} className="w-36">
+                  <option value="all">All terms</option>
+                  {TERMS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                  <option value="none">No term</option>
+                </Select>
+                <span className="text-xs text-muted-foreground">
+                  {shownHistory.length} of {history.length} paper{history.length === 1 ? "" : "s"}
+                </span>
+              </div>
               {historyLoading ? (
                 <div className="space-y-3 p-6">
                   {[1, 2, 3].map((i) => (
                     <Skeleton key={i} className="h-10 w-full" />
                   ))}
                 </div>
-              ) : history.length === 0 ? (
+              ) : shownHistory.length === 0 ? (
                 <EmptyState
                   icon={FileText}
-                  title="No papers yet"
-                  description="Save a paper from the Question Paper Builder to see it here."
+                  title={history.length === 0 ? "No papers yet" : "No papers match these filters"}
+                  description={
+                    history.length === 0
+                      ? "Save a paper from the Question Paper Builder to see it here."
+                      : "Choose \"All years\" to see older papers."
+                  }
                   className="m-6"
                 />
               ) : (
@@ -312,6 +394,8 @@ export function ReviewExportPage({
                     <thead>
                       <tr className="border-y border-border bg-secondary/40 text-left text-xs text-muted-foreground">
                         <th className="px-6 py-2.5 font-medium">Paper Name</th>
+                        <th className="px-4 py-2.5 font-medium">Year</th>
+                        <th className="px-4 py-2.5 font-medium">Term</th>
                         <th className="px-4 py-2.5 font-medium">Marks</th>
                         <th className="px-4 py-2.5 font-medium">Duration</th>
                         <th className="px-4 py-2.5 font-medium">Questions</th>
@@ -321,7 +405,7 @@ export function ReviewExportPage({
                       </tr>
                     </thead>
                     <tbody>
-                      {history.map((e) => (
+                      {shownHistory.map((e) => (
                         <tr
                           key={e.id}
                           className="cursor-pointer border-b border-border last:border-0 transition-colors duration-150 hover:bg-secondary/30"
@@ -335,6 +419,8 @@ export function ReviewExportPage({
                               <span className="font-medium text-foreground">{e.name}</span>
                             </div>
                           </td>
+                          <td className="px-4 py-3 text-muted-foreground">{e.academic_year}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{e.term ?? "—"}</td>
                           <td className="px-4 py-3 text-muted-foreground">{e.total_marks}</td>
                           <td className="px-4 py-3 text-muted-foreground">{e.duration_minutes ?? "—"} min</td>
                           <td className="px-4 py-3 text-muted-foreground">{e.question_ids.length}</td>

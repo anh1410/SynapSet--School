@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Search, Trash2, Library, FileStack } from "lucide-react";
+import { Search, Trash2, Library, FileStack, ChevronDown, ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
   BLOOM_LABELS,
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_ORDER,
+  TERMS,
   bulkDeleteQuestions,
   createBlueprint,
   deleteQuestion,
@@ -32,6 +33,18 @@ const difficultyVariant: Record<DifficultyBucket, "success" | "warning" | "destr
   Hard: "destructive",
 };
 
+type GroupBy = "type" | "topic";
+const GROUP_BY_KEY = "synapset_school_bank_group_by";
+const UNTAGGED = "__untagged__";
+
+function readGroupBy(): GroupBy {
+  try {
+    return localStorage.getItem(GROUP_BY_KEY) === "topic" ? "topic" : "type";
+  } catch {
+    return "type";
+  }
+}
+
 export function BankPage({
   initialSearch,
   onPaperCreated,
@@ -46,6 +59,10 @@ export function BankPage({
   const [search, setSearch] = useState(initialSearch ?? "");
   const [topicFilter, setTopicFilter] = useState("all");
   const [difficultyFilter, setDifficultyFilter] = useState("all");
+  const [yearFilter, setYearFilter] = useState("all");
+  const [termFilter, setTermFilter] = useState("all");
+  const [groupBy, setGroupByState] = useState<GroupBy>(readGroupBy);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string[]>([]);
   const [creatingPaper, setCreatingPaper] = useState(false);
   const [authors, setAuthors] = useState<Record<string, string>>({});
@@ -78,15 +95,59 @@ export function BankPage({
     if (search && !q.text.toLowerCase().includes(search.toLowerCase())) return false;
     if (topicFilter !== "all" && !q.topic_ids.includes(topicFilter)) return false;
     if (difficultyFilter !== "all" && difficultyBucket(q.difficulty_score) !== difficultyFilter) return false;
+    if (yearFilter !== "all" && q.academic_year !== yearFilter) return false;
+    if (termFilter === "none" ? !!q.term : termFilter !== "all" && q.term !== termFilter) return false;
     return true;
   });
 
-  // Grouped by question type (in a fixed order) so rows of the same format
-  // always sit together instead of being interleaved by creation order.
-  const groups = QUESTION_TYPE_ORDER.map((type) => ({
-    type,
-    questions: filtered.filter((q) => q.question_type === type),
-  })).filter((g) => g.questions.length > 0);
+  const years = [...new Set(questions.map((q) => q.academic_year).filter((y): y is string => !!y))].sort().reverse();
+
+  const typeRank = (q: Question) => QUESTION_TYPE_ORDER.indexOf(q.question_type);
+
+  // Either grouped by question type (in a fixed order) so rows of the same format sit
+  // together, or by topic: each question sits under its first topic ("Untagged" last),
+  // with its type shown on the row.
+  const groups: { key: string; label: string; questions: Question[] }[] =
+    groupBy === "type"
+      ? QUESTION_TYPE_ORDER.map((type) => ({
+          key: type,
+          label: QUESTION_TYPE_LABELS[type],
+          questions: filtered.filter((q) => q.question_type === type),
+        })).filter((g) => g.questions.length > 0)
+      : (() => {
+          const byTopic = new Map<string, Question[]>();
+          for (const q of filtered) {
+            const key = q.topic_ids[0] ?? UNTAGGED;
+            byTopic.set(key, [...(byTopic.get(key) ?? []), q]);
+          }
+          return [...byTopic.entries()]
+            .map(([key, qs]) => ({
+              key,
+              label: key === UNTAGGED ? "Untagged" : topicName(key),
+              questions: [...qs].sort((a, b) => typeRank(a) - typeRank(b)),
+            }))
+            .sort((a, b) =>
+              a.key === UNTAGGED ? 1 : b.key === UNTAGGED ? -1 : a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+            );
+        })();
+
+  const setGroupBy = (next: GroupBy) => {
+    setGroupByState(next);
+    setCollapsed(new Set());
+    try {
+      localStorage.setItem(GROUP_BY_KEY, next);
+    } catch {
+      // storage can be unavailable; the choice just won't be remembered
+    }
+  };
+
+  const toggleGroup = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -177,9 +238,47 @@ export function BankPage({
               <option value="Medium">Medium</option>
               <option value="Hard">Hard</option>
             </Select>
+            <Select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="sm:w-32">
+              <option value="all">All years</option>
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </Select>
+            <Select value={termFilter} onChange={(e) => setTermFilter(e.target.value)} className="sm:w-32">
+              <option value="all">All terms</option>
+              {TERMS.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+              <option value="none">No term</option>
+            </Select>
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-muted-foreground">Group by</span>
+        <div className="flex rounded-lg bg-secondary p-1 font-medium">
+          {(["type", "topic"] as const).map((g) => (
+            <button
+              key={g}
+              onClick={() => setGroupBy(g)}
+              className={cn(
+                "rounded-md px-2.5 py-1 transition-colors",
+                groupBy === g ? "bg-white text-foreground shadow-sm" : "text-muted-foreground"
+              )}
+            >
+              {g === "type" ? "Question type" : "Topic"}
+            </button>
+          ))}
+        </div>
+        <span className="text-muted-foreground">
+          {filtered.length} question{filtered.length === 1 ? "" : "s"} in {groups.length} section{groups.length === 1 ? "" : "s"}
+        </span>
+      </div>
 
       {selected.length > 0 && (
         <div className="flex items-center justify-between rounded-lg border border-primary/20 bg-accent px-4 py-2.5 text-sm animate-fade-in">
@@ -229,13 +328,19 @@ export function BankPage({
                 </thead>
                 <tbody>
                   {groups.map((group) => (
-                    <Fragment key={group.type}>
-                      <tr className="border-b border-border bg-secondary/60">
+                    <Fragment key={group.key}>
+                      <tr
+                        className="cursor-pointer border-b border-border bg-secondary/60 hover:bg-secondary"
+                        onClick={() => toggleGroup(group.key)}
+                      >
                         <td colSpan={7} className="px-6 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
-                          {QUESTION_TYPE_LABELS[group.type]} ({group.questions.length})
+                          <span className="inline-flex items-center gap-1">
+                            {collapsed.has(group.key) ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                            {group.label} ({group.questions.length})
+                          </span>
                         </td>
                       </tr>
-                      {group.questions.map((q) => {
+                      {!collapsed.has(group.key) && group.questions.map((q) => {
                         const bucket = difficultyBucket(q.difficulty_score);
                         return (
                           <tr
@@ -250,9 +355,12 @@ export function BankPage({
                             </td>
                             <td className="max-w-md px-2 py-3">
                               <p className="line-clamp-2 text-foreground">{q.text}</p>
-                              {q.author_id && authors[q.author_id] && (
-                                <p className="mt-0.5 text-[11px] text-muted-foreground">By {authors[q.author_id]}</p>
-                              )}
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                                {groupBy === "topic" && <Badge variant="secondary">{QUESTION_TYPE_LABELS[q.question_type]}</Badge>}
+                                {q.term && <Badge variant="outline">{q.term}</Badge>}
+                                {q.academic_year && <span>{q.academic_year}</span>}
+                                {q.author_id && authors[q.author_id] && <span>· By {authors[q.author_id]}</span>}
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-muted-foreground">
                               {q.topic_ids.length > 0 ? q.topic_ids.map(topicName).join(", ") : "—"}

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.api.deps import get_current_teacher, require_admin, require_subject
+from app.core.audit_store import record, snippet
 from app.core.graph_store import get_graph_store
 from app.core.question_bank import get_question_bank
 from app.schemas.bloom import BloomLevel
@@ -170,7 +171,10 @@ def list_questions(subject_id: str, teacher: Teacher = Depends(get_current_teach
 def save_question(question: Question, teacher: Teacher = Depends(get_current_teacher)) -> Question:
     """Persist a question the user has reviewed (e.g. a generation preview they approved)."""
     require_subject(question.subject_id, teacher)
+    existing = get_question_bank().get(question.id)
     get_question_bank().add(question)
+    if existing is not None and teacher.role == "admin":  # an edit of a banked question (generation saves are new)
+        record(teacher, "question.edit", f"Edited a question: {snippet(question.text)}", "question", question.id)
     return question
 
 
@@ -182,6 +186,7 @@ def delete_question(question_id: str, teacher: Teacher = Depends(get_current_tea
         raise HTTPException(status_code=404, detail="Question not found")
     require_subject(question.subject_id, teacher)
     bank.remove(question_id)
+    record(teacher, "question.delete", f"Deleted a question from the bank: {snippet(question.text)}", "question", question_id)
     return {"deleted": question_id}
 
 
@@ -207,4 +212,5 @@ def bulk_delete_questions(
             continue
         if bank.remove(question_id):
             deleted.append(question_id)
+            record(teacher, "question.delete", f"Deleted a question from the bank: {snippet(question.text)}", "question", question_id)
     return {"deleted": deleted}

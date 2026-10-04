@@ -4,9 +4,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.api.deps import get_current_teacher, require_admin, require_subject
+from app.core.academic import check_academic_year, check_term
+from app.core.audit_store import record
 from app.core.config import get_settings
 from app.core.credit_store import get_credit_store
 from app.core.paper_store import get_paper_store
@@ -134,6 +136,11 @@ class CreateBlueprintRequest(BaseModel):
     total_marks: int
     duration_minutes: int | None = None
     sections: list[CreateBlueprintSectionInput] = []
+    academic_year: str | None = None  # defaults to the current school year
+    term: str | None = None
+
+    _year = field_validator("academic_year")(check_academic_year)
+    _term = field_validator("term")(check_term)
 
 
 class UpdateBlueprintRequest(BaseModel):
@@ -142,6 +149,11 @@ class UpdateBlueprintRequest(BaseModel):
     duration_minutes: int | None = None
     sections: list[CreateBlueprintSectionInput] | None = None
     status: BlueprintStatus | None = None
+    academic_year: str | None = None
+    term: str | None = None  # send "" to clear it
+
+    _year = field_validator("academic_year")(check_academic_year)
+    _term = field_validator("term")(check_term)
 
 
 @router.post("/blueprints", response_model=PaperBlueprint)
@@ -154,12 +166,15 @@ def create_blueprint(request: CreateBlueprintRequest, teacher: Teacher = Depends
         name=request.name,
         total_marks=request.total_marks,
         duration_minutes=request.duration_minutes,
+        academic_year=request.academic_year,
+        term=request.term,
         sections=[
             BlueprintSection(id=str(uuid.uuid4()), title=s.title, question_format=s.question_format, question_ids=s.question_ids)
             for s in request.sections
         ],
     )
     get_paper_store().add(blueprint)
+    record(teacher, "paper.create", f"Created paper \"{blueprint.name}\"", "paper", blueprint.id)
     return blueprint
 
 
@@ -188,6 +203,8 @@ def update_blueprint(blueprint_id: str, request: UpdateBlueprintRequest, teacher
     store = get_paper_store()
 
     update_data = request.model_dump(exclude_unset=True, exclude={"sections"})
+    if update_data.get("academic_year") is None:
+        update_data.pop("academic_year", None)  # a paper always has a year; blank means "leave it"
     if request.sections is not None:
         update_data["sections"] = [
             BlueprintSection(id=str(uuid.uuid4()), title=s.title, question_format=s.question_format, question_ids=s.question_ids)
@@ -196,13 +213,17 @@ def update_blueprint(blueprint_id: str, request: UpdateBlueprintRequest, teacher
     updated = blueprint.model_copy(update=update_data)
     store.add(updated)
     _sync_credits(updated)
+    changed = [k for k in update_data if k != "sections"] + (["questions"] if request.sections is not None else [])
+    renamed = f" (now \"{updated.name}\")" if "name" in update_data else ""
+    record(teacher, "paper.update", f"Changed paper \"{blueprint.name}\"{renamed}: {', '.join(changed) or 'nothing'}", "paper", blueprint_id)
     return updated
 
 
 @router.delete("/blueprints/{blueprint_id}")
 def delete_blueprint(blueprint_id: str, teacher: Teacher = Depends(get_current_teacher)) -> dict:
-    _require_owned_blueprint(blueprint_id, teacher)
+    blueprint = _require_owned_blueprint(blueprint_id, teacher)
     get_paper_store().remove(blueprint_id)
+    record(teacher, "paper.delete", f"Deleted paper \"{blueprint.name}\"", "paper", blueprint_id)
     return {"deleted": blueprint_id}
 
 
@@ -226,5 +247,6 @@ def export_blueprint(
     blueprint.status = "exported"
     store.add(blueprint)
     _sync_credits(blueprint)
+    record(teacher, "paper.export", f"Exported paper \"{blueprint.name}\" as {format.upper()} ({variant.replace('_', ' ')})", "paper", blueprint.id)
 
     return FileResponse(path, media_type=_MEDIA_TYPES[format], filename=path.name)

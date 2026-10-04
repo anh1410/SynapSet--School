@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from app.api.deps import get_current_teacher, require_admin, require_subject
+from app.core.audit_store import record
 from app.core.graph_store import get_graph_store
 from app.core.subject_store import get_subject_store
 from app.schemas.subject import GRADES, Subject
@@ -54,6 +55,7 @@ def create_subject(request: CreateSubjectRequest, admin: Teacher = Depends(requi
     _ensure_unique(request.name, request.grade)
     subject = Subject(id=str(uuid.uuid4()), teacher_id=admin.id, name=request.name, grade=request.grade)
     get_subject_store().add(subject)
+    record(admin, "subject.create", f"Created subject {subject.name} (grade {subject.grade})", "subject", subject.id)
     return subject
 
 
@@ -91,6 +93,7 @@ def update_subject(
     )
     _ensure_unique(updated.name, updated.grade, ignore_id=subject_id)
     store.add(updated)
+    record(admin, "subject.update", f"Changed subject {subject.name} to {updated.name} (grade {updated.grade})", "subject", subject_id)
     return updated
 
 
@@ -99,5 +102,7 @@ def delete_subject(subject_id: str, admin: Teacher = Depends(require_admin)) -> 
     store = get_subject_store()
     if store.get(subject_id) is None:
         raise HTTPException(status_code=404, detail="Subject not found")
+    subject = store.get(subject_id)
     store.remove(subject_id)
+    record(admin, "subject.delete", f"Deleted subject {subject.name} (grade {subject.grade})", "subject", subject_id)
     return {"deleted": subject_id}

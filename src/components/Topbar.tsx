@@ -27,6 +27,7 @@ const titles: Record<Page, { title: string; subtitle: string }> = {
   submissions: { title: "Teacher Submissions", subtitle: "Review questions your teachers have sent in" },
   mySubjects: { title: "My Subjects", subtitle: "The subjects your admin has assigned to you" },
   mySubmissions: { title: "My Questions", subtitle: "Track what you've submitted and what your admin decided" },
+  activity: { title: "Activity Log", subtitle: "Who changed what in the school" },
   myCredits: { title: "My Credits", subtitle: "Your questions that were used in exam papers" },
   submitQuestion: { title: "Submit a Question", subtitle: "Propose a question for one of your subjects" },
 };
